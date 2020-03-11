@@ -393,19 +393,40 @@ all_cordf2 <- all_cordf %>%
   left_join(dist_mat2)
 
 
-
 write.csv(all_cordf2, "Processed Data/synchrony_dat.csv", row.names = F)
 
-all_cordf_sppsite <- all_cordf2 %>% 
-  filter(Site.x==Site.y&Species.x==Species.y)
+for(i in unique(rings_field$Region)){
+  tree_sub <- filter(rings_field, Region==i) %>% 
+      filter(Year>=max(minyear)) %>%
+      select(tree.uniqueID, Year, raw_growth) %>% 
+      pivot_wider(names_from="tree.uniqueID", values_from="raw_growth") 
+    
+    if(dim(tree_sub)[1]==0){    
+      cordf <- NA
+    } else {
+        treemat <-tree_sub %>% 
+          select(-Year) %>%  as.matrix()
 
-all_cordf_spp <- all_cordf2 %>% 
-  filter(Species.x==Species.y)
+        cormat <- rcorr(treemat, type='pearson')$r
+        cormat[upper.tri(cormat)] <- NA
 
-all_cordf_site <- all_cordf2 %>% 
-  filter(Site.x==Site.y)
+       cordf <- melt(cormat) %>% filter(value!=1&!is.na(value)) %>% 
+          rename(tree1=Var1, tree2=Var2, pearson_r=value) 
+      }
 
-all_cordf_site <- all_cordf2 %>% 
-  filter(Site.x==Site.y)
+    
+    if(i=="San Jac"){all_cordf <- cordf
+      } else all_cordf <- rbind(all_cordf, cordf)
+}
+
+
+all_cordf_raw <- all_cordf %>% 
+  na.omit() %>% 
+  mutate_at("tree1", as.character) %>% 
+  left_join(sub, by=c("tree1"="tree.uniqueID")) %>% 
+  left_join(select(sub, c(tree.uniqueID, Site, Species)), by=c("tree2"="tree.uniqueID")) %>% 
+  left_join(dist_mat2)
+
+write.csv(all_cordf_raw, "Processed Data/synchrony_raw.csv", row.names = F)
 
 ```

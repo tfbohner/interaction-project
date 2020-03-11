@@ -24,19 +24,28 @@ sync_data <- read.csv("Processed Data/synchrony_dat.csv") %>%
   mutate(spp_pair=ifelse(Species.x==Species.y, "same", "different"),
          int_group=paste0(Species.x, Species.y))
 
-mod <- brm(pearson_r~0 + intercept + Distance + (1|int_group), cores=4, data = sync_data)
+int_group <- unique(sync_data$int_group)
+int_true <- c("ACAC", "ACPJ", "ACPL", "ACPP", "PJPJ", "PJPL", "PJPP", "ACPJ", "PLPL",
+              "PPPL","ACPL", "PJPL", "PPPP", "ACPP", "PJPP", "PLPP", "ACAM", "AMAM", "AMPJ", "ACAM")
+int_df <- data.frame(cbind(int_group, int_true))
 
+sync_raw <- read.csv("Processed Data/synchrony_raw.csv") %>% 
+  mutate(spp_pair=ifelse(Species.x==Species.y, "same", "different"),
+         int_group=paste0(Species.x, Species.y))
+mod <- brm(pearson_r~Distance + (1|spp_pair), cores=4, data = sync_data)
+mod.r <- brm(pearson_r~Distance + (1|spp_pair), cores=4, data = sync_raw)
 h <- "sd_int_group__Intercept^2 / (sd_int_group__Intercept^2 + sigma^2) = 0"
 temp <- hypothesis(mod, h, class=NULL)
 
 
-mod <- brm(pearson_r~Distance + (Distance|spp_pair), cores=4, data = sync_data)
+mod2.r <- brm(pearson_r~Distance + (1|int_group), cores=4, data = sync_raw)
+mod3.r <- brm(bf(pearson_r~Distance + (1|int_group), sigma~(1|int_group)), cores=4, data = sync_raw)
 
 h <- "sd_spp_pair__Intercept^2 / (sd_spp_pair__Intercept^2 + sd_spp_pair__Distance^2 +sigma^2) = 0"
 h <- "sd_spp_pair__Distance^2 / (sd_spp_pair__Intercept^2 + sd_spp_pair__Distance^2 +sigma^2) = 0"
 temp <- hypothesis(mod, h, class=NULL)
 
-mod2 <- brm(pearson_r~Distance + (1|spp_pair + Region/hilo), cores=4, data = sync_data)
+mod4.r <- brm(pearson_r~Distance + (1|int_group + Region/hilo), cores=4, data = sync_raw)
 ```
 
 
