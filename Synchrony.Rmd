@@ -46,6 +46,13 @@ h <- "sd_spp_pair__Distance^2 / (sd_spp_pair__Intercept^2 + sd_spp_pair__Distanc
 temp <- hypothesis(mod, h, class=NULL)
 
 mod4.r <- brm(pearson_r~Distance + (1|int_group + Region/hilo), cores=4, data = sync_raw)
+
+bf_tarsus <- bf(tarsus ~ sex + (1|p|fosternest) + (1|q|dam))
+bf_back <- bf(back ~ hatchdate + (1|p|fosternest) + (1|q|dam))
+fit2 <- brm(bf_tarsus + bf_back, data = BTdata, chains = 2, cores = 2)
+
+
+
 ```
 
 
