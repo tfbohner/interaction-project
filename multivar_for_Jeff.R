@@ -83,8 +83,8 @@ ggplot(spp_groups2,aes(x=.value, y=pair)) +
 # I'm liking the function route lately...I did it a lot in the drought analysis because you can specify 
 # parameters...may be the solution for coding the response vars...this would need some changing for it to actually work
 
-model_fun <- function(data, resp, params) {
-  fit2 <- brm(bf(mvbind(resp) ~ 0 + params ), data=data, cores=4)
+form_maker <- function(col, predictors) {
+  form <- bf(as.formula(paste0(names(grow_mat[,col]), "~", predictors)))
 }
 
 # and/or loop
@@ -97,8 +97,44 @@ for(i in unique(rings_field$Site)) {
       na.omit() %>% 
       mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
     
-    mod <- model_fun(grow_mat, resp, params)
+    for(n in 4:ncol(grow_mat)) {
+      form <- form_maker(n, "0")
+      assign(paste0("bf", n), form)
+    }
+
+    if(ncol(grow_mat)==12){
+      mod <- brm(mvbf(bf4, bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12), data=grow_mat, cores=4)
+    } else{if(ncol(grow_mat)==13){
+      mod <- brm(mvbf(bf4, bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13), data=grow_mat, cores=4)
+    } else{if(ncol(grow_mat)==14){
+      mod <- brm(mvbf(bf4, bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14), data=grow_mat, cores=4)
+    } else{if(ncol(grow_mat)==15){
+      mod <- brm(mvbf(bf4, bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14, bf15), data=grow_mat, cores=4)
+    } else{if(ncol(grow_mat)==16){
+      mod <- brm(mvbf(bf4, bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14, bf15, bf16), data=grow_mat, cores=4)
+    }}}}}
     
-    assign(paste("fit", i, j, sep="_"), mod)
+  
+
+    
+    
+    assign(paste0("fit", i, j), mod)
+    saveRDS(mod, file=paste0("saved models/", "fit", i, j, ".rds"))
   }
 }
+
+
+## Check lengths of columns for if statement, 12-16 (so 8-12 response vars)
+for(i in unique(rings_field$Site)) {
+  for(j in unique(rings_field$Neighborhood)){
+    data_sub <- filter(rings_field, Site==i&Neighborhood==j)
+    
+    grow_mat <- data_sub %>% 
+      pivot_wider(id_cols=c("Year", "spei12", "mean_temp_C", "total_ppt_mm"), names_from="tree.uniqueID", values_from="spline_growth", names_prefix="t") %>% 
+      na.omit() %>% 
+      mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
+    
+    print(ncol(grow_mat))
+  }
+}
+
