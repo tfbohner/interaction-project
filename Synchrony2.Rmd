@@ -1,0 +1,165 @@
+---
+title: "Synchrony from multivariate models"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(brms)
+library(tidybayes)
+library(scales)
+```
+
+## Overview
+
+Synchrony is explored here through residual correlations betweeen trees from multivariate models of tree growth.
+```{r data}
+precip <- read.csv("Processed Data/precip_temp_spei.csv")
+rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
+  left_join(precip) %>% 
+  group_by(Site, Neighborhood, Species) %>% 
+  mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) ## counter id if we want it rather than unique ID
+
+```
+
+```{r models}
+
+for(i in unique(rings_field$Site)) {
+  for(j in unique(rings_field$Neighborhood)){
+    assign(paste0("fit", i, j), readRDS(paste0("saved models/with covar/fit", i, j, ".rds")), envir = .GlobalEnv)
+  }
+}
+
+```
+
+
+``` {r funs}
+cor_extract <- function(mod) {
+  vars <- mod %>% 
+  gather_draws(`rescor.*`, regex=T) %>% 
+  median_qi() %>% 
+  filter(str_detect(.variable, "pptmm")==FALSE) %>% 
+  mutate(
+    tree1=str_sub(str_split_fixed(.variable, "__", 3)[,2], start=2),
+    spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac", 
+                ifelse(str_detect(tree1, "pj")==TRUE, "pj", 
+                       ifelse(str_detect(tree1, "pl")==TRUE, "pl", 
+                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+    tree2=str_sub(str_split_fixed(.variable, "__", 3)[,3], start=2),
+    spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac", 
+                ifelse(str_detect(tree2, "pj")==TRUE, "pj", 
+                       ifelse(str_detect(tree2, "pl")==TRUE, "pl", 
+                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+    pair=str_c(spp1, spp2, sep="-"),
+    comp=ifelse(spp1==spp2, "intra", "inter"),
+    Site=i,
+    Neighborhood=j) 
+}
+
+for(i in sort(unique(rings_field$Site))) {
+  for(j in sort(unique(rings_field$Neighborhood))){
+    # print(paste0(i,j))
+    mod <- get(paste0("fit", i, j))
+    vars <- cor_extract(mod)
+
+    if(i=="bm"&j==1){
+      bigvars <- vars
+    } else bigvars <- bind_rows(bigvars, vars)
+  }
+}
+
+
+## clean things up
+bigvars2 <- bigvars %>% 
+  group_by(.variable) %>% 
+  mutate(temp=ifelse(is.unsorted(c(tree1, tree2))==TRUE, "yes", "no"),
+         temp=ifelse(comp=="intra", "no", temp),
+         tree1_temp=ifelse(temp=="yes", tree2, tree1),
+         tree2_temp=ifelse(temp=="yes", tree1, tree2)) %>% 
+  dplyr::select(-c(temp, tree1, tree2, spp1, spp2, pair)) %>% 
+  rename(tree1=tree1_temp, tree2=tree2_temp) %>% 
+  mutate(spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac", 
+                ifelse(str_detect(tree1, "pj")==TRUE, "pj", 
+                       ifelse(str_detect(tree1, "pl")==TRUE, "pl", 
+                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+         spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac", 
+                ifelse(str_detect(tree2, "pj")==TRUE, "pj", 
+                       ifelse(str_detect(tree2, "pl")==TRUE, "pl", 
+                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+         pair=str_c(spp1, spp2, sep="-"))
+
+bigvars2 <- filter(bigvars2, Site!="ic")
+  
+summary <- group_by(bigvars2, spp1, spp2, comp) %>% 
+  summarise(med=median(.value))
+
+spp_subsetter <- function(data, sp) {
+  bind_rows(filter(data, spp1==sp) %>% 
+  mutate(focal_sp=spp1,
+         comp_sp=spp2),
+  filter(bigvars2, spp2==sp) %>% 
+  mutate(focal_sp=spp2,
+         comp_sp=spp1)) %>% 
+    mutate(comp_sp=ifelse(comp_sp==focal_sp, "self", comp_sp)) %>% 
+    group_by(.variable) %>% filter(row_number(focal_sp) == 1)
+}
+
+acdat <- spp_subsetter(bigvars2, "ac")
+
+pjdat <- spp_subsetter(bigvars2, "pj")
+
+pldat <- spp_subsetter(bigvars2, "pl")
+
+ppdat <- spp_subsetter(bigvars2, "pp")
+
+```
+
+```{r fig}
+show_col(viridis_pal()(5))
+
+cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF")
+
+ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
+  geom_density(position = "identity", alpha=0.4) +
+  theme_test() +
+  geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
+  facet_grid(spp2~spp1)
+  
+
+ac <- ggplot(acdat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.4) +
+  theme_test() +
+  ggtitle("A. concolor") +
+  scale_fill_manual(values=cols) +
+  scale_color_manual(values=cols)
+
+pj <- ggplot(pjdat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.4) +
+  theme_test() +
+  ggtitle("P. jeffreyi") +
+  scale_fill_manual(values=cols) +
+  scale_color_manual(values=cols)
+
+pl <- ggplot(pldat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.4) +
+  theme_test() +
+  ggtitle("P. lambertiana") +
+  scale_fill_manual(values=cols) +
+  scale_color_manual(values=cols)
+
+pp <- ggplot(ppdat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.4) +
+  theme_test() +
+  ggtitle("P. ponderosa") +
+  scale_fill_manual(values=cols) +
+  scale_color_manual(values=cols)
+
+```
+
+

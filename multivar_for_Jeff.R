@@ -97,8 +97,8 @@ for(i in unique(rings_field$Site)) {
       na.omit() %>% 
       mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
     
-    for(n in 4:ncol(grow_mat)) {
-      form <- form_maker(n, "0")
+    for(n in 5:ncol(grow_mat)) {
+      form <- form_maker(n, "spei12 + mean_temp_C")
       assign(paste0("bf", n), form)
     }
 
@@ -119,7 +119,7 @@ for(i in unique(rings_field$Site)) {
     
     
     assign(paste0("fit", i, j), mod)
-    saveRDS(mod, file=paste0("saved models/", "fit", i, j, ".rds"))
+    saveRDS(mod, file=paste0("saved models/with covar/", "fit", i, j, ".rds"))
   }
 }
 
