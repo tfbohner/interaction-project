@@ -39,7 +39,7 @@ bf3 <- bf(a3|mi()~0) #... and so on
 
 # fit3 <- brm(mvbf(bf1, bf2, bf3...), data=grow_mat, cores=4
 
-)
+
 ## Extract parameters from no predictor model
 vars <- fit %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
