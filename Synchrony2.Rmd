@@ -1,6 +1,18 @@
 ---
 title: "Synchrony from multivariate models"
-output: html_document
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+author: "Teresa Bohner"
+date: "3/19/2020"
+output: 
+  html_document:
+    toc: true
+    collapsed: false
+    toc_float: true
+    toc_depth: 4
 editor_options: 
   chunk_output_type: console
 ---
@@ -14,6 +26,7 @@ library(tidyverse)
 library(brms)
 library(tidybayes)
 library(scales)
+library(cowplot)
 ```
 
 ## Overview
@@ -29,7 +42,7 @@ rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>%
 ```
 
 ```{r models}
-
+## load all of the brms models
 for(i in unique(rings_field$Site)) {
   for(j in unique(rings_field$Neighborhood)){
     assign(paste0("fit", i, j), readRDS(paste0("saved models/with covar/fit", i, j, ".rds")), envir = .GlobalEnv)
@@ -39,7 +52,8 @@ for(i in unique(rings_field$Site)) {
 ```
 
 
-``` {r funs}
+``` {r funs_and_manip}
+## function to extract the residual correlations
 cor_extract <- function(mod) {
   vars <- mod %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
@@ -62,6 +76,7 @@ cor_extract <- function(mod) {
     Neighborhood=j) 
 }
 
+## extract the residual correlations for each model
 for(i in sort(unique(rings_field$Site))) {
   for(j in sort(unique(rings_field$Neighborhood))){
     # print(paste0(i,j))
@@ -75,7 +90,8 @@ for(i in sort(unique(rings_field$Site))) {
 }
 
 
-## clean things up
+## clean things up some sp pairs aren't alphabetical and causing problems...ie pj-pp isn't considered the same as pp-pj, this code fixes this 
+
 bigvars2 <- bigvars %>% 
   group_by(.variable) %>% 
   mutate(temp=ifelse(is.unsorted(c(tree1, tree2))==TRUE, "yes", "no"),
@@ -95,10 +111,13 @@ bigvars2 <- bigvars %>%
          pair=str_c(spp1, spp2, sep="-"))
 
 bigvars2 <- filter(bigvars2, Site!="ic")
-  
+
+## summary data for median correlation
 summary <- group_by(bigvars2, spp1, spp2, comp) %>% 
   summarise(med=median(.value))
 
+
+## function to extract data at the species level
 spp_subsetter <- function(data, sp) {
   bind_rows(filter(data, spp1==sp) %>% 
   mutate(focal_sp=spp1,
@@ -110,21 +129,17 @@ spp_subsetter <- function(data, sp) {
     group_by(.variable) %>% filter(row_number(focal_sp) == 1)
 }
 
+## subset species
 acdat <- spp_subsetter(bigvars2, "ac")
-
 pjdat <- spp_subsetter(bigvars2, "pj")
-
 pldat <- spp_subsetter(bigvars2, "pl")
-
 ppdat <- spp_subsetter(bigvars2, "pp")
 
 ```
 
 ```{r fig}
-show_col(viridis_pal()(5))
 
-cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF")
-
+## matrix style figure
 ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
   geom_density(position = "identity", alpha=0.4) +
   theme_test() +
@@ -132,34 +147,58 @@ ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
   facet_grid(spp2~spp1)
   
 
-ac <- ggplot(acdat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
-  geom_density(position = "identity", alpha=0.4) +
+# show_col(viridis_pal()(5)) # get the hex codes for the colors
+
+cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF") ## keep species cols consistent
+
+p1 <- ggplot(acdat, aes(.value, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("A. concolor") +
   scale_fill_manual(values=cols) +
-  scale_color_manual(values=cols)
+  scale_color_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation")
 
-pj <- ggplot(pjdat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
-  geom_density(position = "identity", alpha=0.4) +
+p2 <- ggplot(pjdat, aes(.value, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("P. jeffreyi") +
   scale_fill_manual(values=cols) +
-  scale_color_manual(values=cols)
+  scale_color_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation")
 
-pl <- ggplot(pldat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
-  geom_density(position = "identity", alpha=0.4) +
+p3 <- ggplot(pldat, aes(.value, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("P. lambertiana") +
   scale_fill_manual(values=cols) +
-  scale_color_manual(values=cols)
+  scale_color_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation")
 
-pp <- ggplot(ppdat, aes(.value, group=pair, color=comp_sp, fill=comp_sp)) +
-  geom_density(position = "identity", alpha=0.4) +
+p4 <- ggplot(ppdat, aes(.value, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("P. ponderosa") +
   scale_fill_manual(values=cols) +
-  scale_color_manual(values=cols)
+  scale_color_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation")
 
+dummy <- ggplot(bind_rows(acdat, pjdat), aes(.value, color=comp_sp, fill=comp_sp)) +
+  geom_density(alpha=0.5) +
+  theme_test() +
+  ggtitle("P. lambertiana") +
+  scale_fill_manual(values=cols) +
+  scale_color_manual(values=cols) +
+  labs(fill = "Competitor", color="Competitor")
+
+legend <- cowplot::get_legend(dummy)
+plot_grid(legend)
+
+plot_grid(plot_grid(p1,p2,p3,p4, ncol=2), legend, ncol=2, rel_widths = c(1,.2))
 ```
 
 

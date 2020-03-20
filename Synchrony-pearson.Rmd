@@ -1,0 +1,97 @@
+---
+title: "Synchrony"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, message=FALSE, warning=FALSE}
+library(dplR)
+library(tidyverse)
+library(reshape2)
+library(Hmisc)
+library(brms)
+```
+
+## Overview
+
+Synchrony is explored here through pairwise pearson correlations betweeen trees.
+
+```{r data}
+sync_data <- read.csv("Processed Data/synchrony_dat.csv") %>% 
+  mutate(spp_pair=ifelse(Species.x==Species.y, "same", "different"),
+         int_group=paste0(Species.x, Species.y))
+
+int_group <- unique(sync_data$int_group)
+int_true <- c("ACAC", "ACPJ", "ACPL", "ACPP", "PJPJ", "PJPL", "PJPP", "ACPJ", "PLPL",
+              "PPPL","ACPL", "PJPL", "PPPP", "ACPP", "PJPP", "PLPP", "ACAM", "AMAM", "AMPJ", "ACAM")
+int_df <- data.frame(cbind(int_group, int_true))
+
+sync_raw <- read.csv("Processed Data/synchrony_raw.csv") %>% 
+  mutate(spp_pair=ifelse(Species.x==Species.y, "same", "different"),
+         int_group=paste0(Species.x, Species.y))
+mod <- brm(pearson_r~Distance + (1|spp_pair), cores=4, data = sync_data)
+mod.r <- brm(pearson_r~Distance + (1|spp_pair), cores=4, data = sync_raw)
+h <- "sd_int_group__Intercept^2 / (sd_int_group__Intercept^2 + sigma^2) = 0"
+temp <- hypothesis(mod, h, class=NULL)
+
+
+mod2.r <- brm(pearson_r~Distance + (1|int_group), cores=4, data = sync_raw)
+mod3.r <- brm(bf(pearson_r~Distance + (1|int_group), sigma~(1|int_group)), cores=4, data = sync_raw)
+
+h <- "sd_spp_pair__Intercept^2 / (sd_spp_pair__Intercept^2 + sd_spp_pair__Distance^2 +sigma^2) = 0"
+h <- "sd_spp_pair__Distance^2 / (sd_spp_pair__Intercept^2 + sd_spp_pair__Distance^2 +sigma^2) = 0"
+temp <- hypothesis(mod, h, class=NULL)
+
+mod4.r <- brm(pearson_r~Distance + (1|int_group + Region/hilo), cores=4, data = sync_raw)
+
+bf_tarsus <- bf(tarsus ~ sex + (1|p|fosternest) + (1|q|dam))
+bf_back <- bf(back ~ hatchdate + (1|p|fosternest) + (1|q|dam))
+fit2 <- brm(bf_tarsus + bf_back, data = BTdata, chains = 2, cores = 2)
+
+
+
+```
+
+
+
+
+```{r sync plot, echo=F, warning=F}
+
+ggplot(sync_data, aes(Distance, pearson_r, color=Region)) +
+  # geom_point() +
+  geom_smooth(method='lm') +
+  facet_grid(Species.x~Species.y)
+
+
+
+ggplot(all_cordf_sppsite, aes(Species.x, pearson_r, fill=Species.x)) +
+  geom_jitter(aes(color=Species.x)) +
+  geom_violin(alpha=0.2) +
+  facet_grid(hilo~Region) +
+  theme_test() +
+  geom_hline(yintercept=0, linetype="dashed") +
+  ylab("Pairwise pearson r correlation")
+ggplot(all_cordf_spp, aes(Species.x, pearson_r, fill=Species.x)) +
+  geom_jitter(aes(color=Species.x)) +
+  geom_violin(alpha=0.2) +
+  theme_test() +
+  geom_hline(yintercept=0, linetype="dashed") +
+  ylab("Pairwise pearson r correlation")
+ggplot(all_cordf_site, aes(hilo, pearson_r, fill=hilo)) +
+  geom_jitter(aes(color=hilo)) +
+  geom_violin(alpha=0.2) +
+  facet_grid(cols=vars(Region)) +
+  theme_test() +
+  geom_hline(yintercept=0, linetype="dashed") +
+  ylab("Pairwise pearson r correlation") +
+  xlab("Site Elevation")
+ggplot(all_cordf2, aes(Region, pearson_r, fill=Region)) +
+  geom_jitter(aes(color=Region)) +
+  geom_violin(alpha=0.2) +
+  theme_test() +
+  geom_hline(yintercept=0, linetype="dashed") +
+  ylab("Pairwise pearson r correlation")
+```
