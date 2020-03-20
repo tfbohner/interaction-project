@@ -37,7 +37,8 @@ precip <- read.csv("Processed Data/precip_temp_spei.csv")
 rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
   left_join(precip) %>% 
   group_by(Site, Neighborhood, Species) %>% 
-  mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) ## counter id if we want it rather than unique ID
+  mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) %>% ## counter id if we want it rather than unique ID
+  arrange(Site, Neighborhood, Species, ID)
 
 ```
 
@@ -76,6 +77,7 @@ cor_extract <- function(mod) {
     Neighborhood=j) 
 }
 
+
 ## extract the residual correlations for each model
 for(i in sort(unique(rings_field$Site))) {
   for(j in sort(unique(rings_field$Neighborhood))){
@@ -89,26 +91,28 @@ for(i in sort(unique(rings_field$Site))) {
   }
 }
 
+ggplot(vars, aes(.value, fill=comp)) +
+  geom_density(position = 'identity')
 
-## clean things up some sp pairs aren't alphabetical and causing problems...ie pj-pp isn't considered the same as pp-pj, this code fixes this 
+## clean things up some sp pairs aren't alphabetical and causing problems...ie pj-pp isn't considered the same as pp-pj, this code fixes this,  addressed by ordering before model run 
 
-bigvars2 <- bigvars %>% 
-  group_by(.variable) %>% 
-  mutate(temp=ifelse(is.unsorted(c(tree1, tree2))==TRUE, "yes", "no"),
-         temp=ifelse(comp=="intra", "no", temp),
-         tree1_temp=ifelse(temp=="yes", tree2, tree1),
-         tree2_temp=ifelse(temp=="yes", tree1, tree2)) %>% 
-  dplyr::select(-c(temp, tree1, tree2, spp1, spp2, pair)) %>% 
-  rename(tree1=tree1_temp, tree2=tree2_temp) %>% 
-  mutate(spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac", 
-                ifelse(str_detect(tree1, "pj")==TRUE, "pj", 
-                       ifelse(str_detect(tree1, "pl")==TRUE, "pl", 
-                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
-         spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac", 
-                ifelse(str_detect(tree2, "pj")==TRUE, "pj", 
-                       ifelse(str_detect(tree2, "pl")==TRUE, "pl", 
-                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
-         pair=str_c(spp1, spp2, sep="-"))
+# bigvars2 <- bigvars %>% 
+#   group_by(.variable) %>% 
+#   mutate(temp=ifelse(is.unsorted(c(tree1, tree2))==TRUE, "yes", "no"),
+#          temp=ifelse(comp=="intra", "no", temp),
+#          tree1_temp=ifelse(temp=="yes", tree2, tree1),
+#          tree2_temp=ifelse(temp=="yes", tree1, tree2)) %>% 
+#   dplyr::select(-c(temp, tree1, tree2, spp1, spp2, pair)) %>% 
+#   rename(tree1=tree1_temp, tree2=tree2_temp) %>% 
+#   mutate(spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac", 
+#                 ifelse(str_detect(tree1, "pj")==TRUE, "pj", 
+#                        ifelse(str_detect(tree1, "pl")==TRUE, "pl", 
+#                               ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+#          spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac", 
+#                 ifelse(str_detect(tree2, "pj")==TRUE, "pj", 
+#                        ifelse(str_detect(tree2, "pl")==TRUE, "pl", 
+#                               ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+#          pair=str_c(spp1, spp2, sep="-"))
 
 bigvars2 <- filter(bigvars2, Site!="ic")
 
