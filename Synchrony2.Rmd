@@ -46,13 +46,12 @@ region <- rings_field %>%
   group_by(Site) %>% 
   summarize_all(first)
 
-dist<- read.csv("Raw Data/dist mat 20m.csv") %>% 
-  rename(tree1=InputID, tree2=TargetID) %>% 
-  mutate_at(c("tree1", "tree2"), as.character) %>% 
-  filter(tree1%in%rings_field$tree.uniqueID) %>% 
-  filter(tree2%in%rings_field$tree.uniqueID) %>% 
-  mutate(tree1=str_replace(tree1, "_", ""),
-         tree2=str_replace(tree2, "_", ""))
+ids <- ungroup(rings_field) %>% 
+  dplyr::select(c(Site, Neighborhood, tree.uniqueID)) %>% 
+  group_by(Site, Neighborhood, tree.uniqueID) %>%  summarize_all(first)
+
+
+
   
   
 ```
