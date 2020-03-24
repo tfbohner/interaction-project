@@ -40,6 +40,21 @@ rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>%
   mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) %>% ## counter id if we want it rather than unique ID
   arrange(Site, Neighborhood, Species, ID)
 
+region <- rings_field %>% 
+  ungroup() %>% 
+  dplyr::select(c(Site, Region, hilo)) %>% 
+  group_by(Site) %>% 
+  summarize_all(first)
+
+dist<- read.csv("Raw Data/dist mat 20m.csv") %>% 
+  rename(tree1=InputID, tree2=TargetID) %>% 
+  mutate_at(c("tree1", "tree2"), as.character) %>% 
+  filter(tree1%in%rings_field$tree.uniqueID) %>% 
+  filter(tree2%in%rings_field$tree.uniqueID) %>% 
+  mutate(tree1=str_replace(tree1, "_", ""),
+         tree2=str_replace(tree2, "_", ""))
+  
+  
 ```
 
 ```{r models}
@@ -54,7 +69,7 @@ for(i in unique(rings_field$Site)) {
 
 
 ``` {r funs_and_manip}
-## function to extract the residual correlations
+## function to extract the residual correlations----
 cor_extract <- function(mod) {
   vars <- mod %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
@@ -78,7 +93,7 @@ cor_extract <- function(mod) {
 }
 
 
-## extract the residual correlations for each model
+## extract the residual correlations for each model----
 for(i in sort(unique(rings_field$Site))) {
   for(j in sort(unique(rings_field$Neighborhood))){
     # print(paste0(i,j))
@@ -91,56 +106,85 @@ for(i in sort(unique(rings_field$Site))) {
   }
 }
 
-ggplot(vars, aes(.value, fill=comp)) +
-  geom_density(position = 'identity')
-
-## clean things up some sp pairs aren't alphabetical and causing problems...ie pj-pp isn't considered the same as pp-pj, this code fixes this,  addressed by ordering before model run 
-
-# bigvars2 <- bigvars %>% 
-#   group_by(.variable) %>% 
-#   mutate(temp=ifelse(is.unsorted(c(tree1, tree2))==TRUE, "yes", "no"),
-#          temp=ifelse(comp=="intra", "no", temp),
-#          tree1_temp=ifelse(temp=="yes", tree2, tree1),
-#          tree2_temp=ifelse(temp=="yes", tree1, tree2)) %>% 
-#   dplyr::select(-c(temp, tree1, tree2, spp1, spp2, pair)) %>% 
-#   rename(tree1=tree1_temp, tree2=tree2_temp) %>% 
-#   mutate(spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac", 
-#                 ifelse(str_detect(tree1, "pj")==TRUE, "pj", 
-#                        ifelse(str_detect(tree1, "pl")==TRUE, "pl", 
-#                               ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
-#          spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac", 
-#                 ifelse(str_detect(tree2, "pj")==TRUE, "pj", 
-#                        ifelse(str_detect(tree2, "pl")==TRUE, "pl", 
-#                               ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
-#          pair=str_c(spp1, spp2, sep="-"))
-
-bigvars2 <- filter(bigvars2, Site!="ic")
+bigvars2 <- filter(bigvars, Site!="ic")
 
 ## summary data for median correlation
 summary <- group_by(bigvars2, spp1, spp2, comp) %>% 
   summarise(med=median(.value))
 
-
-## function to extract data at the species level
-spp_subsetter <- function(data, sp) {
-  bind_rows(filter(data, spp1==sp) %>% 
-  mutate(focal_sp=spp1,
-         comp_sp=spp2),
-  filter(bigvars2, spp2==sp) %>% 
-  mutate(focal_sp=spp2,
-         comp_sp=spp1)) %>% 
-    mutate(comp_sp=ifelse(comp_sp==focal_sp, "self", comp_sp)) %>% 
-    group_by(.variable) %>% filter(row_number(focal_sp) == 1)
+## function to keep all draws of residual correlations----
+keep_draws <- function(mod) {
+  vars <- mod %>% 
+  gather_draws(`rescor.*`, regex=T) %>% 
+  # filter(str_detect(.variable, "pptmm")==FALSE) %>% 
+  mutate(
+    tree1=str_sub(str_split_fixed(.variable, "__", 3)[,2], start=2),
+    spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac",
+                ifelse(str_detect(tree1, "pj")==TRUE, "pj",
+                       ifelse(str_detect(tree1, "pl")==TRUE, "pl",
+                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+    tree2=str_sub(str_split_fixed(.variable, "__", 3)[,3], start=2),
+    spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac",
+                ifelse(str_detect(tree2, "pj")==TRUE, "pj",
+                       ifelse(str_detect(tree2, "pl")==TRUE, "pl",
+                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+    pair=str_c(spp1, spp2, sep="-"),
+    comp=ifelse(spp1==spp2, "intra", "inter"),
+    Site=i,
+    Neighborhood=j)
 }
 
-## subset species
+for(i in sort(unique(rings_field$Site))) {
+  for(j in sort(unique(rings_field$Neighborhood))){
+    # print(paste0(i,j))
+    mod <- get(paste0("fit", i, j))
+    draws <- keep_draws(mod)
+
+    if(i=="bm"&j==1){
+      bigdraws <- draws
+    } else bigdraws <- bind_rows(bigdraws, draws)
+  }
+}
+
+bigdraws2 <- filter(bigdraws, Site!="ic")
+
+## summary data for median correlation----
+summary2 <- group_by(bigvars2, spp1, spp2, comp) %>% 
+  summarise(med=median(.value))
+
+## function to extract data at the species level----
+spp_subsetter <- function(data, sp) {
+  a <- filter(data, pair==paste(sort(c(sp, "ac")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="ac")
+  b <- filter(data, pair==paste(sort(c(sp, "pj")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="pj")
+  c <- filter(data, pair==paste(sort(c(sp, "pl")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="pl")
+  d <- filter(data, pair==paste(sort(c(sp, "pp")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="pp")
+  
+  bind_rows(a,b,c,d) %>%
+    mutate(comp_sp=ifelse(comp_sp==focal_sp, "self", comp_sp))
+}
+
+## subset species----
 acdat <- spp_subsetter(bigvars2, "ac")
 pjdat <- spp_subsetter(bigvars2, "pj")
 pldat <- spp_subsetter(bigvars2, "pl")
 ppdat <- spp_subsetter(bigvars2, "pp")
 
+acdat <- spp_subsetter(bigdraws2, "ac")
+pjdat <- spp_subsetter(bigdraws2, "pj")
+pldat <- spp_subsetter(bigdraws2, "pl")
+ppdat <- spp_subsetter(bigdraws2, "pp")
+
 ```
 
+compare distributions maintaining all of the draws or just summarizing the medians from each individual pair
 ```{r fig}
 
 ## matrix style figure
@@ -149,7 +193,20 @@ ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
   theme_test() +
   geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
   facet_grid(spp2~spp1)
+
+vars2 <- left_join(bigvars2, region) %>% 
+  left_join(dist)
+
+ggplot(filter(vars2, Site=="sl"), aes(Distance, .value, color=comp)) +
+  geom_point() +
+  geom_smooth(method='lm', se=F) +
+  facet_grid(spp2~spp1)
   
+ggplot(bigdraws2, aes(.value, color=comp, fill=comp)) +
+  geom_density(position = "identity", alpha=0.4) +
+  theme_test() +
+  geom_vline(data=summary2, aes(xintercept = med), linetype="dashed") +
+  facet_grid(spp2~spp1)
 
 # show_col(viridis_pal()(5)) # get the hex codes for the colors
 
@@ -162,6 +219,18 @@ p1 <- ggplot(acdat, aes(.value, color=comp_sp, fill=comp_sp)) +
   scale_fill_manual(values=cols) +
   scale_color_manual(values=cols) +
   theme(legend.position = 'none') +
+  xlab("Correlation")
+
+acdat2 <- left_join(acdat, region) 
+
+ggplot(acdat2, aes(.value, color=comp_sp, fill=comp_sp)) +
+  geom_density(position = "identity", alpha=0.5) +
+  theme_test() +
+  ggtitle("A. concolor") +
+  scale_fill_manual(values=cols) +
+  scale_color_manual(values=cols) +
+  theme(legend.position = 'none') +
+  facet_grid(Region~hilo)+
   xlab("Correlation")
 
 p2 <- ggplot(pjdat, aes(.value, color=comp_sp, fill=comp_sp)) +

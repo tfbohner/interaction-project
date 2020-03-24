@@ -297,25 +297,43 @@ dia_data2 <- dia_data %>%
                          ifelse(Species=="x", "xx",
                                 ifelse(Species=="a?", "ax", Species))),
          tree.uniqueID = tolower(paste(paste(siteno, Species, Neighborhood, sep=""), ID, sep="_")),
-         totDBH=rowSums(dplyr::select(., "DBH", "DBHstem2", "DBHstem3"), na.rm=T),
+         DBHstem1=ifelse(!is.na(DBHT3), DBHT3, 
+                       ifelse(!is.na(DBHT2), DBHT2, DBH)),
+         BA1 = .00007854*DBHstem1^2,
+         BA2 = .00007854*DBHstem2^2,
+         BA3 = .00007854*DBHstem3^2) %>% 
+  mutate(totDBH=rowSums(dplyr::select(.,"DBHstem1", "DBHstem2", "DBHstem3"), na.rm=T),
+         totBA=rowSums(dplyr::select(.,"BA1", "BA2", "BA3"), na.rm=T),
          totDBH=ifelse(totDBH==0, NA, totDBH),
-         totDBH=ifelse(!is.na(DBHT3), DBHT3, 
-                       ifelse(!is.na(DBHT2), DBHT2, totDBH))) %>% 
-  
-  dplyr::select(c(tree.uniqueID, totDBH))
+         totBA=ifelse(totBA==0, NA, totBA)) %>% 
+  dplyr::select(c(tree.uniqueID, Site, Neighborhood, Species, totDBH, totBA))
+
+freq_dat <- dia_data2 %>% 
+  group_by(Site, Neighborhood) %>% 
+  mutate(nb_BA=sum(totBA, na.rm=T),
+         nb_stem=length(!is.na(totBA))) %>% 
+  group_by(Site, Neighborhood, Species) %>% 
+  summarise(nb_BA=mean(nb_BA),
+            nb_stem=mean(nb_stem),
+            sp_BA=sum(totBA, na.rm=T),
+            sp_stem=length(!is.na(totBA)),
+            freq_BA=sp_BA/nb_BA,
+            freq_stem=sp_stem/nb_stem)
+
+write.csv(freq_dat, "Processed Data/frequency_data.csv", row.names = F)
 # 
 # focalsub <- group_by(allrings, tree.uniqueID) %>%
 #   summarise()
 # 
 # test <-anti_join(focalsub, dia_data2)
-
+dia_data2 <- dplyr::select(dia_data2, c(tree.uniqueID, totDBH, totBA))
 dist_mat <- read.csv("Raw Data/dist mat 20m.csv") %>% 
   rename(focalID=InputID, compID=TargetID) %>% 
   mutate_at(c("focalID", "compID"), as.character) %>% 
   left_join(dia_data2, by=c("focalID"="tree.uniqueID")) %>%
-  rename(focalDBH=totDBH) %>% 
+  rename(focalDBH=totDBH, focalBA=totBA) %>% 
   left_join(dia_data2, by=c("compID"="tree.uniqueID")) %>%
-  rename(compDBH=totDBH) %>% 
+  rename(compDBH=totDBH, compBA=totBA) %>% 
   filter(focalID!=compID) %>% 
   mutate(Distance=ifelse(Distance==0, 0.000001, Distance))
 
@@ -330,7 +348,7 @@ hegyi <- dist_mat %>%
   group_by(focalID, focalDBH) %>%
   mutate(ratio=(compDBH/focalDBH)/Distance,
          simple=compDBH/Distance,
-         BA= 0.00007854*compDBH^2) %>%
+         BA= compBA) %>%
   summarise(hegyi=sum(ratio, na.rm=T),
             simple_comp=(sum(simple, na.rm=T)),
             BA = sum(BA, na.rm=T)) ### missing lots of dbh's
