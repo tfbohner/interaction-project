@@ -273,4 +273,147 @@ legend <- cowplot::get_legend(dummy)
 plot_grid(plot_grid(p1,p2,p3,p4, ncol=2), legend, ncol=2, rel_widths = c(1,.2))
 ```
 
+```{r time_models}
+## load all of the brms models
+timeseq <- seq(1910, 2010, by=10)
+for(i in unique(rings_field$Site)) {
+  for(j in unique(rings_field$Neighborhood)){
+    for(t in timeseq) {
+    assign(paste0("fit", i, j, t), readRDS(paste0("saved models/timeslice/fit", i, j, t, ".rds")), envir = .GlobalEnv)
+    }
+  }
+}
 
+```
+
+``` {r time_funs_and_manip}
+## function to extract the residual correlations----
+cor_extract2 <- function(mod) {
+  vars <- mod %>% 
+  gather_draws(`rescor.*`, regex=T) %>% 
+  median_qi() %>% 
+  filter(str_detect(.variable, "pptmm")==FALSE) %>% 
+  mutate(
+    tree1=str_sub(str_split_fixed(.variable, "__", 3)[,2], start=2),
+    spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac", 
+                ifelse(str_detect(tree1, "pj")==TRUE, "pj", 
+                       ifelse(str_detect(tree1, "pl")==TRUE, "pl", 
+                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+    tree2=str_sub(str_split_fixed(.variable, "__", 3)[,3], start=2),
+    spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac", 
+                ifelse(str_detect(tree2, "pj")==TRUE, "pj", 
+                       ifelse(str_detect(tree2, "pl")==TRUE, "pl", 
+                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+    pair=str_c(spp1, spp2, sep="-"),
+    comp=ifelse(spp1==spp2, "intra", "inter"),
+    Site=i,
+    Neighborhood=j,
+    time=t) 
+}
+
+
+## extract the residual correlations for each model----
+for(i in sort(unique(rings_field$Site))) {
+  for(j in sort(unique(rings_field$Neighborhood))){
+    for(t in timeseq){
+         # print(paste0(i,j))
+    mod <- get(paste0("fit", i, j, t))
+    vars <- cor_extract2(mod)
+
+    if(t==1910){
+      bm <- vars
+    } else bm <- bind_rows(bm, vars)
+    }
+ 
+  }
+}
+
+
+test <- select(bm, c(.value, time)) %>% 
+  group_by(time) %>% 
+  summarise(.upper=quantile(.value, probs=.975),
+            .lower=quantile(.value, probs=.025),
+            .value=quantile(.value, probs=.5),
+            .width=0.95) %>% 
+  mutate_at(vars(time), as.factor)
+
+ggplot(test, aes(y=time, x=.value, upper=.upper, lower=.lower)) +
+  geom_pointintervalh()
+
+bigvars2 <- filter(bigvars, Site!="ic")
+
+## summary data for median correlation
+summary <- group_by(bigvars2, spp1, spp2, comp) %>% 
+  summarise(med=median(.value))
+
+## function to keep all draws of residual correlations----
+keep_draws <- function(mod) {
+  vars <- mod %>% 
+  gather_draws(`rescor.*`, regex=T) %>% 
+  # filter(str_detect(.variable, "pptmm")==FALSE) %>% 
+  mutate(
+    tree1=str_sub(str_split_fixed(.variable, "__", 3)[,2], start=2),
+    spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac",
+                ifelse(str_detect(tree1, "pj")==TRUE, "pj",
+                       ifelse(str_detect(tree1, "pl")==TRUE, "pl",
+                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+    tree2=str_sub(str_split_fixed(.variable, "__", 3)[,3], start=2),
+    spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac",
+                ifelse(str_detect(tree2, "pj")==TRUE, "pj",
+                       ifelse(str_detect(tree2, "pl")==TRUE, "pl",
+                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+    pair=str_c(spp1, spp2, sep="-"),
+    comp=ifelse(spp1==spp2, "intra", "inter"),
+    Site=i,
+    Neighborhood=j)
+}
+
+for(i in sort(unique(rings_field$Site))) {
+  for(j in sort(unique(rings_field$Neighborhood))){
+    # print(paste0(i,j))
+    mod <- get(paste0("fit", i, j))
+    draws <- keep_draws(mod)
+
+    if(i=="bm"&j==1){
+      bigdraws <- draws
+    } else bigdraws <- bind_rows(bigdraws, draws)
+  }
+}
+
+bigdraws2 <- filter(bigdraws, Site!="ic")
+
+## summary data for median correlation----
+summary2 <- group_by(bigvars2, spp1, spp2, comp) %>% 
+  summarise(med=median(.value))
+
+## function to extract data at the species level----
+spp_subsetter <- function(data, sp) {
+  a <- filter(data, pair==paste(sort(c(sp, "ac")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="ac")
+  b <- filter(data, pair==paste(sort(c(sp, "pj")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="pj")
+  c <- filter(data, pair==paste(sort(c(sp, "pl")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="pl")
+  d <- filter(data, pair==paste(sort(c(sp, "pp")), collapse="-")) %>%
+    mutate(focal_sp=sp,
+           comp_sp="pp")
+  
+  bind_rows(a,b,c,d) %>%
+    mutate(comp_sp=ifelse(comp_sp==focal_sp, "self", comp_sp))
+}
+
+## subset species----
+acdat <- spp_subsetter(bigvars2, "ac")
+pjdat <- spp_subsetter(bigvars2, "pj")
+pldat <- spp_subsetter(bigvars2, "pl")
+ppdat <- spp_subsetter(bigvars2, "pp")
+
+acdat <- spp_subsetter(bigdraws2, "ac")
+pjdat <- spp_subsetter(bigdraws2, "pj")
+pldat <- spp_subsetter(bigdraws2, "pl")
+ppdat <- spp_subsetter(bigdraws2, "pp")
+
+```
