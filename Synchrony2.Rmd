@@ -27,13 +27,32 @@ library(brms)
 library(tidybayes)
 library(scales)
 library(cowplot)
+library(ggridges)
 ```
 
 ## Overview
 
+### Questions
+- How does synchrony of tree growth vary across regional/elevation gradients?
+Prediction: higher synchrony in lower latitude and lower elevation (drier) populations (SIASH, dendrochronological principles)
+
+- Within populations is intraspecific synchrony greater than interspecific synchrony? Between specific species pairs? With increasing distance?
+Prediction: higher synchrony among intraspecific pairs, potentially higher synchrony between pine pairs versus pine-fir pairs (successional stages), and lower synchrony with increasing distance
+
+- How has synchrony changed through time? Are changes more dramatic in certain populations? Is increased or decreased synchrony associated with certain environmental variables?
+Prediction: synchrony has increased with time, increased synchrony associated with drier, more variable time windows, changes are more pronounced in xeric populations.
+
 Synchrony is explored here through residual correlations betweeen trees from multivariate models of tree growth.
 ```{r data}
 precip <- read.csv("Processed Data/precip_temp_spei.csv")
+
+timeseq <- seq(1910, 2010, by=10)
+
+precip_summary <- expand_grid(precip, timeseq) %>% 
+  filter(Year-timeseq>-11, Year-timeseq<11) %>% 
+  group_by(Site, siteno, Neighborhood, hilo, timeseq) %>% 
+  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=mean, sd=sd))
+
 rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
   left_join(precip) %>% 
   group_by(Site, Neighborhood, Species) %>% 
@@ -49,10 +68,6 @@ region <- rings_field %>%
 ids <- ungroup(rings_field) %>% 
   dplyr::select(c(Site, Neighborhood, tree.uniqueID)) %>% 
   group_by(Site, Neighborhood, tree.uniqueID) %>%  summarize_all(first)
-
-
-
-  
   
 ```
 
@@ -183,7 +198,9 @@ ppdat <- spp_subsetter(bigdraws2, "pp")
 
 ```
 
-compare distributions maintaining all of the draws or just summarizing the medians from each individual pair
+#### Q2 Intra-interspecific competition
+*note difference in distribution with when keeping all of the draws versus summarizing median correlations. 
+
 ```{r fig}
 
 ## matrix style figure
@@ -193,18 +210,13 @@ ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
   geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
   facet_grid(spp2~spp1)
 
-vars2 <- left_join(bigvars2, region) %>% 
-  left_join(dist)
-
-ggplot(filter(vars2, Site=="sl"), aes(Distance, .value, color=comp)) +
-  geom_point() +
-  geom_smooth(method='lm', se=F) +
-  facet_grid(spp2~spp1)
-  
+# vars2 <- left_join(bigvars2, region) %>% 
+#   left_join(dist)
+# 
 ggplot(bigdraws2, aes(.value, color=comp, fill=comp)) +
   geom_density(position = "identity", alpha=0.4) +
   theme_test() +
-  geom_vline(data=summary2, aes(xintercept = med), linetype="dashed") +
+  geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
   facet_grid(spp2~spp1)
 
 # show_col(viridis_pal()(5)) # get the hex codes for the colors
@@ -220,17 +232,17 @@ p1 <- ggplot(acdat, aes(.value, color=comp_sp, fill=comp_sp)) +
   theme(legend.position = 'none') +
   xlab("Correlation")
 
-acdat2 <- left_join(acdat, region) 
-
-ggplot(acdat2, aes(.value, color=comp_sp, fill=comp_sp)) +
-  geom_density(position = "identity", alpha=0.5) +
-  theme_test() +
-  ggtitle("A. concolor") +
-  scale_fill_manual(values=cols) +
-  scale_color_manual(values=cols) +
-  theme(legend.position = 'none') +
-  facet_grid(Region~hilo)+
-  xlab("Correlation")
+# acdat2 <- left_join(acdat, region) 
+# 
+# ggplot(acdat2, aes(.value, color=comp_sp, fill=comp_sp)) +
+#   geom_density(position = "identity", alpha=0.5) +
+#   theme_test() +
+#   ggtitle("A. concolor") +
+#   scale_fill_manual(values=cols) +
+#   scale_color_manual(values=cols) +
+#   theme(legend.position = 'none') +
+#   facet_grid(Region~hilo)+
+#   xlab("Correlation")
 
 p2 <- ggplot(pjdat, aes(.value, color=comp_sp, fill=comp_sp)) +
   geom_density(position = "identity", alpha=0.5) +
@@ -273,16 +285,26 @@ legend <- cowplot::get_legend(dummy)
 plot_grid(plot_grid(p1,p2,p3,p4, ncol=2), legend, ncol=2, rel_widths = c(1,.2))
 ```
 
-```{r time_models}
-## load all of the brms models
-timeseq <- seq(1910, 2010, by=10)
+```{r cleanup1}
 for(i in unique(rings_field$Site)) {
   for(j in unique(rings_field$Neighborhood)){
-    for(t in timeseq) {
-    assign(paste0("fit", i, j, t), readRDS(paste0("saved models/timeslice/fit", i, j, t, ".rds")), envir = .GlobalEnv)
-    }
+    rm(list=paste0("fit", i, j))
   }
 }
+```
+#### Q3 Synchrony through time
+Used 20 year time blocks overlapping 10 years
+
+```{r time_models, eval=F}
+## load all of the brms models
+
+# for(i in unique(rings_field$Site)) {
+#   for(j in unique(rings_field$Neighborhood)){
+#     for(t in timeseq) {
+#     assign(paste0("fit", i, j, t), readRDS(paste0("saved models/timeslice/fit", i, j, t, ".rds")), envir = .GlobalEnv)
+#     }
+#   }
+# }
 
 ```
 
@@ -313,79 +335,31 @@ cor_extract2 <- function(mod) {
 
 
 ## extract the residual correlations for each model----
-for(i in sort(unique(rings_field$Site))) {
-  for(j in sort(unique(rings_field$Neighborhood))){
-    for(t in timeseq){
-         # print(paste0(i,j))
-    mod <- get(paste0("fit", i, j, t))
-    vars <- cor_extract2(mod)
 
-    if(t==1910){
-      bm <- vars
-    } else bm <- bind_rows(bm, vars)
-    }
- 
-  }
-}
+# for(file in list.files("saved models/timeslice")) {
+#   print(file)
+#   mod <- readRDS(paste0("saved models/timeslice/", file))
+#   
+#   i <- str_sub(file, 4,5)
+#   j <- as.numeric(str_sub(file, 6,6))
+#   t <- as.numeric(str_sub(file, 7,10))
+#   
+#   vars <- cor_extract2(mod)
+#   
+#   if(i=="bm"&j==1&t==1910){
+#     bigvars <- vars
+#     } else bigvars <- bind_rows(bigvars, vars)
+#   
+# }
+# 
+# bigvars2 <- filter(bigvars, Site!="ic")
+# write.csv(bigvars2, "Processed Data/synchrony_decadal.csv", row.names = F)
+bigvars2 <- read.csv("Processed Data/synchrony_decadal.csv")
 
+```
+distribution of median correlations through time.
 
-test <- select(bm, c(.value, time)) %>% 
-  group_by(time) %>% 
-  summarise(.upper=quantile(.value, probs=.975),
-            .lower=quantile(.value, probs=.025),
-            .value=quantile(.value, probs=.5),
-            .width=0.95) %>% 
-  mutate_at(vars(time), as.factor)
-
-ggplot(test, aes(y=time, x=.value, upper=.upper, lower=.lower)) +
-  geom_pointintervalh()
-
-bigvars2 <- filter(bigvars, Site!="ic")
-
-## summary data for median correlation
-summary <- group_by(bigvars2, spp1, spp2, comp) %>% 
-  summarise(med=median(.value))
-
-## function to keep all draws of residual correlations----
-keep_draws <- function(mod) {
-  vars <- mod %>% 
-  gather_draws(`rescor.*`, regex=T) %>% 
-  # filter(str_detect(.variable, "pptmm")==FALSE) %>% 
-  mutate(
-    tree1=str_sub(str_split_fixed(.variable, "__", 3)[,2], start=2),
-    spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac",
-                ifelse(str_detect(tree1, "pj")==TRUE, "pj",
-                       ifelse(str_detect(tree1, "pl")==TRUE, "pl",
-                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
-    tree2=str_sub(str_split_fixed(.variable, "__", 3)[,3], start=2),
-    spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac",
-                ifelse(str_detect(tree2, "pj")==TRUE, "pj",
-                       ifelse(str_detect(tree2, "pl")==TRUE, "pl",
-                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
-    pair=str_c(spp1, spp2, sep="-"),
-    comp=ifelse(spp1==spp2, "intra", "inter"),
-    Site=i,
-    Neighborhood=j)
-}
-
-for(i in sort(unique(rings_field$Site))) {
-  for(j in sort(unique(rings_field$Neighborhood))){
-    # print(paste0(i,j))
-    mod <- get(paste0("fit", i, j))
-    draws <- keep_draws(mod)
-
-    if(i=="bm"&j==1){
-      bigdraws <- draws
-    } else bigdraws <- bind_rows(bigdraws, draws)
-  }
-}
-
-bigdraws2 <- filter(bigdraws, Site!="ic")
-
-## summary data for median correlation----
-summary2 <- group_by(bigvars2, spp1, spp2, comp) %>% 
-  summarise(med=median(.value))
-
+```{r time_spp_sub}
 ## function to extract data at the species level----
 spp_subsetter <- function(data, sp) {
   a <- filter(data, pair==paste(sort(c(sp, "ac")), collapse="-")) %>%
@@ -411,9 +385,143 @@ pjdat <- spp_subsetter(bigvars2, "pj")
 pldat <- spp_subsetter(bigvars2, "pl")
 ppdat <- spp_subsetter(bigvars2, "pp")
 
+cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF") ## keep species cols consistent
+
+ggplot(acdat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
+  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
+  stat_density_ridges(alpha=0) +
+  facet_grid(~comp_sp) +
+  theme_test() +
+  ggtitle("A. concolor") +
+  scale_fill_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation") +
+  ylab("20 year block (year +/- 10)")
+ggplot(pjdat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
+  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
+  stat_density_ridges(alpha=0) +
+  facet_grid(~comp_sp) +
+  theme_test() +
+  ggtitle("P. jeffreyi") +
+  scale_fill_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation") +
+  ylab("20 year block (year +/- 10)")
+ggplot(pldat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
+  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
+  stat_density_ridges(alpha=0) +
+  facet_grid(~comp_sp) +
+  theme_test() +
+  ggtitle("P. lambertiana") +
+  scale_fill_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation") +
+  ylab("20 year block (year +/- 10)")
+ggplot(ppdat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
+  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
+  stat_density_ridges(alpha=0) +
+  facet_grid(~comp_sp) +
+  theme_test() +
+  ggtitle("P. ponderosa") +
+  scale_fill_manual(values=cols) +
+  theme(legend.position = 'none') +
+  xlab("Correlation") +
+  ylab("20 year block (year +/- 10)")
+
+```
+
+```{r climate_time}
+# ggplot(precip_summary, aes(timeseq, total_ppt_mm_sd, color=Site)) +
+#   geom_point() 
+# 
+# ggplot(precip_summary, aes(timeseq, total_ppt_mm_mean, color=Site)) +
+#   geom_point()
+
+ggplot(precip_summary, aes(total_ppt_mm_mean, total_ppt_mm_sd, color=timeseq)) +
+  geom_point() +
+  theme_test() 
+
+# 
+# ggplot(precip_summary, aes(timeseq, mean_temp_C_sd, color=Site)) +
+#   geom_point()
+# 
+# ggplot(precip_summary, aes(timeseq, mean_temp_C_mean, color=Site)) +
+#   geom_point()
+
+ggplot(precip_summary, aes(mean_temp_C_mean, mean_temp_C_sd, color=timeseq)) +
+  geom_point()+
+  theme_test() 
+
+# ggplot(precip_summary, aes(timeseq, spei12_sd, color=Site)) +
+#   geom_point()
+# 
+# ggplot(precip_summary, aes(timeseq, spei12_mean, color=Site)) +
+#   geom_point()
+
+ggplot(precip_summary, aes(spei12_mean, spei12_sd, color=timeseq)) +
+  geom_point()+
+  theme_test() 
+
+
+```
+
+
+```{r keepdraws, eval=F}
+## function to keep all draws of residual correlations----
+keep_draws2 <- function(mod) {
+  vars <- mod %>% 
+  gather_draws(`rescor.*`, regex=T) %>% 
+  # filter(str_detect(.variable, "pptmm")==FALSE) %>% 
+  mutate(
+    tree1=str_sub(str_split_fixed(.variable, "__", 3)[,2], start=2),
+    spp1=ifelse(str_detect(tree1, "ac")==TRUE, "ac",
+                ifelse(str_detect(tree1, "pj")==TRUE, "pj",
+                       ifelse(str_detect(tree1, "pl")==TRUE, "pl",
+                              ifelse(str_detect(tree1, "pp")==TRUE, "pp", "am")))),
+    tree2=str_sub(str_split_fixed(.variable, "__", 3)[,3], start=2),
+    spp2=ifelse(str_detect(tree2, "ac")==TRUE, "ac",
+                ifelse(str_detect(tree2, "pj")==TRUE, "pj",
+                       ifelse(str_detect(tree2, "pl")==TRUE, "pl",
+                              ifelse(str_detect(tree2, "pp")==TRUE, "pp", "am")))),
+    pair=str_c(spp1, spp2, sep="-"),
+    comp=ifelse(spp1==spp2, "intra", "inter"),
+    Site=i,
+    Neighborhood=j,
+    time=t)
+}
+
+for(file in list.files("saved models/timeslice")) {
+  print(file)
+  mod <- readRDS(paste0("saved models/timeslice/", file))
+  
+  i <- str_sub(file, 4,5)
+  j <- as.numeric(str_sub(file, 6,6))
+  t <- as.numeric(str_sub(file, 7,10))
+  
+  draws <- keep_draws2(mod)
+  
+  if(i=="bm"&j==1&t==1910){
+    big_draws <- draws
+    } else big_draws <- bind_rows(big_draws, draw
+  
+}
+
+
+## summary data for median correlation----
+summary2 <- group_by(big_draws, spp1, spp2, comp, time) %>% 
+  summarise(med=median(.value))
+
+ggplot(summary2, aes(time, med, color=comp)) +
+  geom_point() +
+  geom_smooth(method='lm') +
+  facet_grid(spp2~spp1)
+
+
+
+## subset species----
+
 acdat <- spp_subsetter(bigdraws2, "ac")
 pjdat <- spp_subsetter(bigdraws2, "pj")
 pldat <- spp_subsetter(bigdraws2, "pl")
 ppdat <- spp_subsetter(bigdraws2, "pp")
-
 ```

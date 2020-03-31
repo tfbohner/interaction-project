@@ -180,46 +180,59 @@ for(i in unique(rings_field$Site)) {
 #### Looping through timme chunks ----
 timeseq <- seq(1910, 2010, by=10)
 
-for(i in unique(rings_field$Site)) {
+for(i in unique(rings_field$Site)[4:8]) {
   for(j in unique(rings_field$Neighborhood)){
     for(t in timeseq) {
       data_sub <- filter(rings_field, Site==i&Neighborhood==j) %>% 
         filter(Year>t-11, Year<t+11)
       
-      grow_mat <- data_sub %>% 
-        pivot_wider(id_cols=c("Year", "spei12", "mean_temp_C", "total_ppt_mm"), names_from="tree.uniqueID", values_from="spline_growth", names_prefix="t") %>% 
-        na.omit() %>% 
-        mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
-      
-      for(n in 5:ncol(grow_mat)) {
-        form <- form_maker(n, "0") #spei12 + mean_temp_C
-        assign(paste0("bf", n), form)
+      if(t==2010){
+        grow_mat <- data_sub %>% 
+          pivot_wider(id_cols=c("Year", "spei12", "mean_temp_C", "total_ppt_mm"), names_from="tree.uniqueID", values_from="spline_growth", names_prefix="t") %>% 
+          na.omit() %>%
+          # select_if(~ !any(is.na(.))) %>%
+          mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
+      } else{
+        grow_mat <- data_sub %>% 
+          pivot_wider(id_cols=c("Year", "spei12", "mean_temp_C", "total_ppt_mm"), names_from="tree.uniqueID", values_from="spline_growth", names_prefix="t") %>% 
+          # na.omit() %>%
+          select_if(~ !any(is.na(.))) %>%
+          mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
       }
       
-      if(ncol(grow_mat)==9){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==10){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==11){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==12){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==13){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==14){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==15){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14, bf15), family=student, data=grow_mat, cores=4)
-      } else{if(ncol(grow_mat)==16){
-        mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14, bf15, bf16), family=student, data=grow_mat, cores=4)
-      }}}}}}}}
-      
-      
-      assign(paste0("fit", i, j, t), mod)
-      saveRDS(mod, file=paste0("saved models/timeslice/", "fit", i, j, t, ".rds")) #with covar/
+      if(nrow(grow_mat)>1){
+        
+        for(n in 5:ncol(grow_mat)) {
+          form <- form_maker(n, "0") #spei12 + mean_temp_C
+          assign(paste0("bf", n), form)
+        }
+        
+        if(ncol(grow_mat)==9){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==10){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==11){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==12){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==13){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==14){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==15){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14, bf15), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        } else{if(ncol(grow_mat)==16){
+          mod <- brm(mvbf(bf5, bf6, bf7, bf8, bf9, bf10, bf11, bf12, bf13, bf14, bf15, bf16), family=student, data=grow_mat, cores=4, control=list(adapt_delta=0.99))
+        }}}}}}}}
+        
+        
+        # assign(paste0("fit", i, j, t), mod)
+        saveRDS(mod, file=paste0("saved models/timeslice/", "fit", i, j, t, ".rds")) #with covar/
+      }
     }
   }
 }
+
 
 vars1 <- fitbm11950 %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
