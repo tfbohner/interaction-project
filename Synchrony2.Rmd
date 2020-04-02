@@ -6,7 +6,7 @@ knit: (function(input_file, encoding) {
  encoding=encoding,
  output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 author: "Teresa Bohner"
-date: "3/19/2020"
+date: "3/30/2020"
 output: 
   html_document:
     toc: true
@@ -25,6 +25,7 @@ knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
 library(tidyverse)
 library(brms)
 library(tidybayes)
+library(viridis)
 library(scales)
 library(cowplot)
 library(ggridges)
@@ -34,13 +35,13 @@ library(ggridges)
 
 ### Questions
 - How does synchrony of tree growth vary across regional/elevation gradients?
-Prediction: higher synchrony in lower latitude and lower elevation (drier) populations (SIASH, dendrochronological principles)
+-- Prediction: higher synchrony in lower latitude and lower elevation (drier) populations (SIASH, dendrochronological principles)
 
 - Within populations is intraspecific synchrony greater than interspecific synchrony? Between specific species pairs? With increasing distance?
-Prediction: higher synchrony among intraspecific pairs, potentially higher synchrony between pine pairs versus pine-fir pairs (successional stages), and lower synchrony with increasing distance
+-- Prediction: higher synchrony among intraspecific pairs, potentially higher synchrony between pine pairs versus pine-fir pairs (successional stages), and lower synchrony with increasing distance
 
 - How has synchrony changed through time? Are changes more dramatic in certain populations? Is increased or decreased synchrony associated with certain environmental variables?
-Prediction: synchrony has increased with time, increased synchrony associated with drier, more variable time windows, changes are more pronounced in xeric populations.
+-- Prediction: synchrony has increased with time, increased synchrony associated with drier, more variable time windows, changes are more pronounced in xeric populations.
 
 Synchrony is explored here through residual correlations betweeen trees from multivariate models of tree growth.
 ```{r data}
@@ -70,6 +71,8 @@ ids <- ungroup(rings_field) %>%
   group_by(Site, Neighborhood, tree.uniqueID) %>%  summarize_all(first)
   
 ```
+
+## Q2 Intra-interspecific competition
 
 ```{r models}
 ## load all of the brms models
@@ -198,7 +201,6 @@ ppdat <- spp_subsetter(bigdraws2, "pp")
 
 ```
 
-#### Q2 Intra-interspecific competition
 *note difference in distribution with when keeping all of the draws versus summarizing median correlations. 
 
 ```{r fig}
@@ -292,21 +294,9 @@ for(i in unique(rings_field$Site)) {
   }
 }
 ```
-#### Q3 Synchrony through time
+## Q3 Synchrony through time
 Used 20 year time blocks overlapping 10 years
 
-```{r time_models, eval=F}
-## load all of the brms models
-
-# for(i in unique(rings_field$Site)) {
-#   for(j in unique(rings_field$Neighborhood)){
-#     for(t in timeseq) {
-#     assign(paste0("fit", i, j, t), readRDS(paste0("saved models/timeslice/fit", i, j, t, ".rds")), envir = .GlobalEnv)
-#     }
-#   }
-# }
-
-```
 
 ``` {r time_funs_and_manip}
 ## function to extract the residual correlations----
@@ -356,8 +346,17 @@ cor_extract2 <- function(mod) {
 # write.csv(bigvars2, "Processed Data/synchrony_decadal.csv", row.names = F)
 bigvars2 <- read.csv("Processed Data/synchrony_decadal.csv")
 
+ggplot(bigvars2, aes(x=`.value`, y=as.factor(time), fill=stat(x))) +
+  # stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
+  geom_density_ridges_gradient() +
+  facet_grid(~Site) +
+  theme_test() +
+  scale_fill_gradient2() +
+  theme(legend.position = 'none') +
+  xlab("Correlation") +
+  ylab("20 year block (year +/- 10)")
 ```
-distribution of median correlations through time.
+
 
 ```{r time_spp_sub}
 ## function to extract data at the species level----
@@ -524,4 +523,14 @@ acdat <- spp_subsetter(bigdraws2, "ac")
 pjdat <- spp_subsetter(bigdraws2, "pj")
 pldat <- spp_subsetter(bigdraws2, "pl")
 ppdat <- spp_subsetter(bigdraws2, "pp")
+```
+
+```{r time_models}
+alldata <- bigvars2 %>% 
+  select(.value, tree1, tree2, spp1, spp2, pair, comp, Site, Neighborhood, time) %>% 
+  rename(corr=.value) %>% 
+  left_join(precip_summary, by=c("Site","Neighborhood", "time"="timeseq"))
+
+mod <- brm(corr~time + (time|pair), data=alldata, cores=4)
+
 ```

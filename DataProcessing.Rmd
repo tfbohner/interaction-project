@@ -308,58 +308,51 @@ dia_data2 <- dia_data %>%
          totBA=ifelse(totBA==0, NA, totBA)) %>% 
   dplyr::select(c(tree.uniqueID, Site, Neighborhood, Species, totDBH, totBA))
 
-freq_dat <- dia_data2 %>% 
-  group_by(Site, Neighborhood) %>% 
-  mutate(nb_BA=sum(totBA, na.rm=T),
-         nb_stem=length(!is.na(totBA))) %>% 
-  group_by(Site, Neighborhood, Species) %>% 
-  summarise(nb_BA=mean(nb_BA),
-            nb_stem=mean(nb_stem),
-            sp_BA=sum(totBA, na.rm=T),
-            sp_stem=length(!is.na(totBA)),
-            freq_BA=sp_BA/nb_BA,
-            freq_stem=sp_stem/nb_stem)
+raw_loc <- read.csv("Raw data/all_loc.csv") 
+
+test <- raw_loc %>% 
+  filter(tree.uniqueID %in% raw_loc$tree.uniqueID[duplicated(raw_loc$tree.uniqueID)==T])
+
+loc_data <- raw_loc %>% 
+  inner_join(dplyr::select(dia_data2, c(tree.uniqueID, Site, Neighborhood))) %>% ## there are some naming errors
+  group_by(tree.uniqueID) %>% summarise_all(first)
+# loc_data <- loc_data %>%
+#   filter(Site=="Black Mountain") %>%
+#   filter(Neighborhood==3)
+
+library(geosphere)
+xy <- dplyr::select(loc_data, c(X, Y))
+pair <- data.frame(distm(xy, fun=distGeo)) %>% ## calculates distance in m based on WGS84 elipsoid
+  mutate(tree.uniqueID=loc_data$tree.uniqueID)
+names(pair) <- c(loc_data$tree.uniqueID, "focalID")
+
+dist_long <- pair %>% 
+  pivot_longer(cols=-focalID, names_to="periphID", values_to="dist") %>% 
+  filter(dist!=0, dist<=20) %>% 
+  filter(focalID %in% unique(allrings$tree.uniqueID)) %>% 
+  left_join(dplyr::select(dia_data2, c("focalID"="tree.uniqueID", Species, totDBH, totBA))) %>% 
+  rename(focalsp=Species, DBH=totDBH, focalBA=totBA) %>% 
+  left_join(dplyr::select(dia_data2, c("periphID"="tree.uniqueID", Species, totBA))) %>% 
+  rename(periphsp=Species) %>% 
+  mutate(con_het=ifelse(focalsp==periphsp, "con", "het"))
+
+comp_summary <- dist_long %>% 
+  group_by(focalID, DBH, focalBA, con_het) %>% 
+  summarise(stems=length(periphID),
+            BA=sum(totBA)) %>% 
+  pivot_wider(id_cols = c(focalID, DBH, focalBA), names_from = con_het, values_from=c(stems, BA)) %>% 
+  mutate_at(vars(-group_cols()), .funs=function(x){ifelse(is.na(x), 0, x)})
+
+freq_dat <- comp_summary %>% 
+  left_join(dplyr::select(dia_data2, c("focalID"="tree.uniqueID", Site, Neighborhood))) %>% 
+  group_by(focalID) %>% 
+  mutate(con_freq=(1+stems_con)/(1+stems_con+stems_het),
+         con_freqBA=(focalBA+BA_con)/(focalBA+BA_con+BA_het))
+
 
 write.csv(freq_dat, "Processed Data/frequency_data.csv", row.names = F)
-# 
-# focalsub <- group_by(allrings, tree.uniqueID) %>%
-#   summarise()
-# 
-# test <-anti_join(focalsub, dia_data2)
-dia_data2 <- dplyr::select(dia_data2, c(tree.uniqueID, totDBH, totBA))
-dist_mat <- read.csv("Raw Data/dist mat 20m.csv") %>% 
-  rename(focalID=InputID, compID=TargetID) %>% 
-  mutate_at(c("focalID", "compID"), as.character) %>% 
-  left_join(dia_data2, by=c("focalID"="tree.uniqueID")) %>%
-  rename(focalDBH=totDBH, focalBA=totBA) %>% 
-  left_join(dia_data2, by=c("compID"="tree.uniqueID")) %>%
-  rename(compDBH=totDBH, compBA=totBA) %>% 
-  filter(focalID!=compID) %>% 
-  mutate(Distance=ifelse(Distance==0, 0.000001, Distance))
 
-# treeswithcoord <- group_by(dist_mat, focalID) %>%
-#   summarise() %>%
-#   filter(focalID%in%unique(allrings$tree.uniqueID))
-# 
-# test2 <- anti_join(focalsub, treeswithcoord, by=c("tree.uniqueID"="focalID"))
-
-hegyi <- dist_mat %>%
-  # na.omit() %>% 
-  group_by(focalID, focalDBH) %>%
-  mutate(ratio=(compDBH/focalDBH)/Distance,
-         simple=compDBH/Distance,
-         BA= compBA) %>%
-  summarise(hegyi=sum(ratio, na.rm=T),
-            simple_comp=(sum(simple, na.rm=T)),
-            BA = sum(BA, na.rm=T)) ### missing lots of dbh's
-
-hegyi_focal <- filter(hegyi, focalID%in%unique(allrings$tree.uniqueID)) %>%
-  rename(tree.uniqueID=focalID) %>% 
-  dplyr::select(-focalDBH)
-
-rings_field <- inner_join(allrings, hegyi_focal) %>%
-  left_join(dia_data2) %>%
-  rename(DBH=totDBH)
+rings_field <- left_join(allrings, dplyr::select(freq_dat, -c(Site, Neighborhood)), by=c("tree.uniqueID"="focalID"))
 
 write.csv(rings_field, "Processed Data/matched_rings_field.csv", row.names = F)
 ```
