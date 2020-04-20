@@ -4,6 +4,8 @@ output:
   html_document:
     toc: true
     toc_float: true
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -26,6 +28,9 @@ library(knitr)
 library(SPEI)
 library(googledrive)
 library(googlesheets4)
+library(geosphere)
+library(Hmisc)
+library(reshape2)
 
 ```
 ## Site Characteristics
@@ -230,10 +235,17 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   bai <- bai.out(raw, diam = NULL)
   bai$Year <- as.numeric(rownames(bai))
   
+  ar <- detrend(rwl = treeave, method="Ar")
+  ar$Year <- as.numeric(rownames(ar))
+  
+  nexp <- detrend(rwl = treeave, method="ModNegExp")
+  nexp$Year <- as.numeric(rownames(nexp))
+  
   spl <- detrend(rwl = treeave, method="Spline")
   spl$Year <- as.numeric(rownames(spl))
   
   fss <- detrend(rwl = treeave, method="Friedman")
+  fss_ar <- detrend(fss, method="Ar")
   fss$Year <- as.numeric(rownames(fss))
   
   dat<- gather(zero, key="tree", "temp", -Year) %>%
@@ -241,6 +253,7 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
     dplyr::select(-temp) %>% 
     left_join(gather(raw, key="tree", "raw_growth", -Year)) %>%
     left_join(gather(bai, key="tree", "BAI", -Year)) %>%
+    left_join(gather(nexp, key="tree", "nexp_growth", -Year)) %>%
     left_join(gather(spl, key="tree", "spline_growth", -Year)) %>%
     left_join(gather(fss, key="tree", "fss_growth", -Year)) %>%
     na.omit() %>%
@@ -308,6 +321,7 @@ dia_data2 <- dia_data %>%
          totBA=ifelse(totBA==0, NA, totBA)) %>% 
   dplyr::select(c(tree.uniqueID, Site, Neighborhood, Species, totDBH, totBA))
 
+
 raw_loc <- read.csv("Raw data/all_loc.csv") 
 
 test <- raw_loc %>% 
@@ -320,7 +334,6 @@ loc_data <- raw_loc %>%
 #   filter(Site=="Black Mountain") %>%
 #   filter(Neighborhood==3)
 
-library(geosphere)
 xy <- dplyr::select(loc_data, c(X, Y))
 pair <- data.frame(distm(xy, fun=distGeo)) %>% ## calculates distance in m based on WGS84 elipsoid
   mutate(tree.uniqueID=loc_data$tree.uniqueID)
@@ -349,7 +362,7 @@ freq_dat <- comp_summary %>%
   mutate(con_freq=(1+stems_con)/(1+stems_con+stems_het),
          con_freqBA=(focalBA+BA_con)/(focalBA+BA_con+BA_het))
 
-
+write.csv(dist_long, "Processed Data/dist_long.csv", row.names=F)
 write.csv(freq_dat, "Processed Data/frequency_data.csv", row.names = F)
 
 rings_field <- left_join(allrings, dplyr::select(freq_dat, -c(Site, Neighborhood)), by=c("tree.uniqueID"="focalID"))
@@ -389,12 +402,12 @@ for(i in unique(rings_field$Region)){
       } else all_cordf <- rbind(all_cordf, cordf)
 }
 
-sub <- select(rings_field, c(tree.uniqueID, Site, Species, Region, hilo, hegyi, DBH)) %>% 
+sub <- select(rings_field, c(tree.uniqueID, Site, Species, Region, hilo, DBH, con_freq, con_freqBA)) %>% 
   group_by(tree.uniqueID) %>% 
   summarise_all(first)
 
-dist_mat2 <- select(dist_mat, c(focalID, compID, Distance)) %>% 
-  rename(tree1=focalID, tree2=compID)
+dist_mat2 <- select(dist_long, c(focalID, periphID, dist)) %>% 
+  rename(tree1=focalID, tree2=periphID)
 
 all_cordf2 <- all_cordf %>% 
   na.omit() %>% 

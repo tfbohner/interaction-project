@@ -1,4 +1,5 @@
-## This script will run the multivariate brms model
+## This script will run the multivariate brms model and calculate residual individual tree correlations
+## Both the models for the entire time series and the moving window approach are in this script.
 library(tidyverse)
 library(brms)
 library(tidybayes)
@@ -11,33 +12,39 @@ rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>%
   mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) %>% ## counter id if we want it rather than unique ID
   arrange(Site, Neighborhood, Species, ID)
 
+
 ## Example neighborhood----
 neigh1 <- rings_field %>% 
   filter(siteno==11) %>% 
-  filter(Neighborhood==1)
+  filter(Neighborhood==1) 
+
+ggplot(neigh1, aes(Year, nexp_growth, color=tree.uniqueID)) + geom_line() + facet_wrap(~tree.uniqueID) + theme(legend.position = 'none')
+ggplot(neigh1, aes(Year, raw_growth, color=tree.uniqueID)) + geom_line() + facet_wrap(~tree.uniqueID) + theme(legend.position = 'none')
+ggplot(neigh1, aes(Year, BAI, color=tree.uniqueID)) + geom_line() + facet_wrap(~tree.uniqueID) + theme(legend.position = 'none')
+ggplot(neigh1, aes(Year, spline_growth, color=tree.uniqueID)) + geom_line() + facet_wrap(~tree.uniqueID) + theme(legend.position = 'none')
+
 
 count_na <- function(x) sum(is.na(x))
-
-df$count_na <- df %>%
-  
-  select(starts_with("word")) %>%
-  
-  apply(., 1, count_na)
-
 
 grow_mat <- neigh1 %>% 
   pivot_wider(id_cols=c("Year", "spei12", "mean_temp_C", "total_ppt_mm"), names_from="tree.uniqueID", values_from="spline_growth", names_prefix="t") %>% 
   # na.omit() %>% ## can include missing data if we want
   mutate(nacount=apply(., 1, count_na)) %>% 
   filter(nacount<4) %>% 
-  select(-nacount) %>% 
-  mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
+  select(-nacount) #%>% 
+  #mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
 
 names(grow_mat) <- c("year", "spei12", "mean_temp_C","total_ppt_mm","a1", "a2", "a3", "a4", "b5", "b6", "b7", "b8", "c9", "c10", "c11", "c12")
 apply(grow_mat, 2, count_na)
 
 ## no predictors, corr mat is close to pearson
-fit <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 0, sigma~0), data=grow_mat, cores=4)
+fit.a <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 0, sigma~0), data=grow_mat, cores=4)
+fit.b <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), data=grow_mat, cores=4)
+fit.c <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), data=grow_mat, cores=4)
+fit.d <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), data=grow_mat, cores=4)
+
+fit.e <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1 +(1|year)), data=grow_mat, cores=4)
+
 fit4 <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 0), 
             family=student, 
             prior = prior(gamma(2, .1), class = nu),
@@ -72,7 +79,7 @@ fit3 <- brm(bf1 + bf2 + bf3 + bf4 + bf5 + bf6 + bf7 + bf8 + bf9 + bf10 + bf11 + 
 
 
 ## Extract parameters from no predictor model
-vars <- fit %>% 
+vars <- fit.e %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
   median_qi() %>% 
   mutate(
