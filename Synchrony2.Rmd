@@ -58,7 +58,8 @@ rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>%
   left_join(precip) %>% 
   group_by(Site, Neighborhood, Species) %>% 
   mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) %>% ## counter id if we want it rather than unique ID
-  arrange(Site, Neighborhood, Species, ID)
+  arrange(Site, Neighborhood, Species, ID) 
+  
 
 region <- rings_field %>% 
   ungroup() %>% 
@@ -72,7 +73,7 @@ ids <- ungroup(rings_field) %>%
 
 bigvars2 <- read.csv("Processed Data/synchrony_multivar.csv")
 bigdraws2 <- read.csv("Processed Data/synchrony_multivar_draws.csv")
-bigvars_t2 <- read.csv("Processed Data/synchrony_decadal.csv")
+bigvars_t2 <- read.csv("Processed Data/synchrony_decadal.csv") 
   
 ```
 
@@ -105,44 +106,10 @@ summary <- group_by(bigvars2, spp1, spp2, comp) %>%
 
 ## subset species----
 acdat <- spp_subsetter(bigvars2, "ac")
-acgrid <- expand_grid(acdat$.variable[which(acdat$comp=="intra")], acdat$.variable[which(acdat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(acdat, c("var1"=".variable", ".value", "Site", "Neighborhood", "pair"))) %>% 
-  inner_join(dplyr::select(acdat, c(".variable", ".value", "Site", "Neighborhood", "pair")), by=c("var2"=".variable"))%>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y) %>% 
-  mutate(diff=.value.x-.value.y,
-         sign=ifelse(diff>0, "pos", "neg"))
-length(acgrid$sign[which(acgrid$sign=="pos")])/nrow(acgrid)
-
 pjdat <- spp_subsetter(bigvars2, "pj")
-pjgrid <- expand_grid(pjdat$.variable[which(pjdat$comp=="intra")], pjdat$.variable[which(pjdat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(pjdat, c("var1"=".variable", ".value", "Site", "Neighborhood", "pair"))) %>% 
-  inner_join(dplyr::select(pjdat, c(".variable", ".value", "Site", "Neighborhood", "pair")), by=c("var2"=".variable")) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y) %>% 
-  mutate(diff=.value.x-.value.y,
-         sign=ifelse(diff>0, "pos", "neg"))
-length(pjgrid$sign[which(pjgrid$sign=="pos")])/nrow(pjgrid)
-
 pldat <- spp_subsetter(bigvars2, "pl")
-plgrid <- expand_grid(pldat$.variable[which(pldat$comp=="intra")], pldat$.variable[which(pldat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(pldat, c("var1"=".variable", ".value", "Site", "Neighborhood", "pair"))) %>% 
-  inner_join(dplyr::select(pldat, c(".variable", ".value", "Site", "Neighborhood", "pair")), by=c("var2"=".variable")) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y) %>% 
-  mutate(diff=.value.x-.value.y,
-         sign=ifelse(diff>0, "pos", "neg"))
-length(plgrid$sign[which(plgrid$sign=="pos")])/nrow(plgrid)
-
 ppdat <- spp_subsetter(bigvars2, "pp")
-ppgrid <- expand_grid(ppdat$.variable[which(ppdat$comp=="intra")], ppdat$.variable[which(ppdat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(ppdat, c("var1"=".variable", ".value", "Site", "Neighborhood", "pair"))) %>% 
-  inner_join(dplyr::select(ppdat, c(".variable", ".value", "Site", "Neighborhood", "pair")), by=c("var2"=".variable")) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y) %>% 
-  mutate(diff=.value.x-.value.y,
-         sign=ifelse(diff>0, "pos", "neg"))
-length(ppgrid$sign[which(ppgrid$sign=="pos")])/nrow(ppgrid)
+
 
 acdat <- spp_subsetter(bigdraws2, "ac")
 pjdat <- spp_subsetter(bigdraws2, "pj")

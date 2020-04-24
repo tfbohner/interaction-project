@@ -339,6 +339,18 @@ pair <- data.frame(distm(xy, fun=distGeo)) %>% ## calculates distance in m based
   mutate(tree.uniqueID=loc_data$tree.uniqueID)
 names(pair) <- c(loc_data$tree.uniqueID, "focalID")
 
+dist_focal <- pair %>% 
+  pivot_longer(cols=-focalID, names_to="periphID", values_to="dist") %>% 
+  filter(dist!=0) %>% 
+  filter(focalID %in% unique(allrings$tree.uniqueID)) %>% 
+  filter(periphID %in% unique(allrings$tree.uniqueID)) %>% 
+  left_join(dplyr::select(dia_data2, c("focalID"="tree.uniqueID", Species, totDBH, Site, Neighborhood))) %>% 
+  rename(focalsp=Species, DBH=totDBH, Site.x=Site, Neighborhood.x=Neighborhood) %>% 
+  left_join(dplyr::select(dia_data2, c("periphID"="tree.uniqueID", Species, totBA, Site, Neighborhood))) %>% 
+  rename(periphsp=Species) %>% 
+  filter(Site==Site.x, Neighborhood==Neighborhood.x) %>% 
+  dplyr::select(-c(Neighborhood.x, Site.x, Neighborhood, Site))
+
 dist_long <- pair %>% 
   pivot_longer(cols=-focalID, names_to="periphID", values_to="dist") %>% 
   filter(dist!=0, dist<=20) %>% 
@@ -362,6 +374,7 @@ freq_dat <- comp_summary %>%
   mutate(con_freq=(1+stems_con)/(1+stems_con+stems_het),
          con_freqBA=(focalBA+BA_con)/(focalBA+BA_con+BA_het))
 
+write.csv(dist_focal, "Processed Data/dist_focal.csv", row.names=F)
 write.csv(dist_long, "Processed Data/dist_long.csv", row.names=F)
 write.csv(freq_dat, "Processed Data/frequency_data.csv", row.names = F)
 
