@@ -2,18 +2,28 @@
 ## 3. Post-processing
 #### Purpose: Intra and interspecific correlation comparisons
 #### Author: Teresa Bohner
-#### Date Modified: 20 April 2020
+#### Date Modified: 24 April 2020
 
 ## Inputs: tree correlation exports both time-invariant and decadal
 ## Outputs: Focal species expanded dataframe, intra/inter relationship dataframe
 
 ## load packages
 library(tidyverse)
+library(modelr)
 library(brms)
 library(tidybayes)
 
 ## load necessary data
 bigvars2 <- read.csv("Processed Data/synchrony_multivar.csv")
+
+## load tree data 
+tree_data <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
+  mutate(tree.uniqueID=as.factor(str_remove(tree.uniqueID, "_")),
+         Species=tolower(Species)) %>% 
+  dplyr::select(c(Site, Species, Neighborhood, Region, hilo, tree.uniqueID, DBH)) %>% 
+  group_by(tree.uniqueID) %>% 
+  summarise_all(first) %>% 
+  filter(Site!="ic")
 
 ## 1a. Functions for time invariant models----
 ## subset each species
@@ -53,81 +63,66 @@ length(unique(pldat$tree1[which(pldat$comp=="intra")]))
 length(unique(ppdat$tree1[which(ppdat$comp=="intra")]))
 
 
-unique(pjdat$tree1[which(pjdat$comp=="intra")]) %in% unique(pjdat$tree2[which(pjdat$comp=="intra")])
-## expand to intra-interspecific correlation comparisons----
-acgrid <- expand_grid(acdat$.variable[which(acdat$comp=="intra")], acdat$.variable[which(acdat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(acdat, c("var1"=".variable", ".value", "Site", "Neighborhood", "intra_sp"="spp1", "tree1", "pair"))) %>% 
-  inner_join(dplyr::select(acdat, c(".variable", ".value", "Site", "Neighborhood", "inter_sp"="spp2", "tree1", "pair")), by=c("var2"=".variable")) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y, tree1.x==tree1.y) %>% 
-  mutate(diff=.value.x-.value.y,
-         intra_greater=ifelse(diff>0, 1,0))
+## gridding to compare individual pairwise intra versus interspecific correlations ----
 
-length(acgrid$intra_greater[which(acgrid$intra_greater==1)])/nrow(acgrid)
-
-ac_summ <- acgrid %>% 
-  group_by(var1, Site.x, Neighborhood.x, pair.y, intra_sp, inter_sp) %>% 
-  summarise(intra_greater=sum(intra_greater),
-            size=length(intra_greater)) %>% 
-  mutate(nb=as.factor(Neighborhood.x))
+## grid all interactions at neighborhood level
+tree_grid <- tree_data %>% 
+  group_by(tree1=tree.uniqueID, Site, Neighborhood, spp1=Species, Region, hilo) %>%
+  data_grid(tree2=tree.uniqueID) %>% 
+  left_join(dplyr::select(tree_data, c(tree2=tree.uniqueID, Site2=Site, nb2=Neighborhood, spp2=Species))) %>% 
+  filter(Site==Site2, Neighborhood==nb2) %>% 
+  mutate(comp=ifelse(spp1==spp2,"intra", "inter")) %>% 
+  dplyr::select(-c(Site2, nb2)) %>% 
+  filter(tree1!=tree2)
 
 
-  
-# test_mod <- brm(intra_greater|trials(size)~ 1, data=ac_summ, family=binomial, cores=4)
-# 
-# test_mod2 <- brm(intra_greater|trials(size)~ Site.x +pair.y, data=ac_summ, family=binomial, cores=4)
+intra_grid <- filter(tree_grid, comp=="intra") %>% 
+  rename_at(vars(-c(Site, Neighborhood, Region, hilo)), function(x) str_c(x, ".x"))
+inter_grid <- filter(tree_grid, comp=="inter") %>% 
+  rename_all(function(x) str_c(x, ".y"))
+
+## grid intra versus interspecific correlations at neighborhood level
+pairwise_grid <- expand_grid(intra_grid, inter_grid) %>% 
+  filter(Site==Site.y, Neighborhood==Neighborhood.y, tree1.x==tree1.y) %>% 
+  dplyr::select(-c(Site.y, Neighborhood.y, Region.y, hilo.y))
+
+## now match each pairwise interaction with the proper correlatios
+cor_data <- bigvars2 %>% 
+  dplyr::select(c(.variable, .value, .lower, .upper, tree1, tree2))
+
+## match intraspecific correlations
+match1 <- inner_join(pairwise_grid, cor_data, by=c("tree1.x"="tree1", "tree2.x"="tree2"))
+match2 <- inner_join(pairwise_grid, cor_data, by=c("tree1.x"="tree2", "tree2.x"="tree1"))
+match3 <- bind_rows(match1, match2)
 
 
-pjgrid <- expand_grid(pjdat$.variable[which(pjdat$comp=="intra")], pjdat$.variable[which(pjdat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(pjdat, c("var1"=".variable", ".value", "Site", "Neighborhood", "intra_sp"="spp1","tree1", "pair"))) %>% 
-  inner_join(dplyr::select(pjdat, c(".variable", ".value", "Site", "Neighborhood", "spp1", "spp2", "tree1", "tree2", "pair")), by=c("var2"=".variable")) %>% 
-  mutate(inter_sp=ifelse(spp1=="pj", as.character(spp2), as.character(spp1))) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y, 
-         as.character(tree1.x)==as.character(tree1.y)|as.character(tree1.x)==as.character(tree2)) %>% 
-  mutate(diff=.value.x-.value.y,
-         intra_greater=ifelse(diff>0, 1,0)) 
-
-plgrid <- expand_grid(pldat$.variable[which(pldat$comp=="intra")], pldat$.variable[which(pldat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(pldat, c("var1"=".variable", ".value", "Site", "Neighborhood", "intra_sp"="spp1","tree1", "pair"))) %>% 
-  inner_join(dplyr::select(pldat, c(".variable", ".value", "Site", "Neighborhood", "spp1", "spp2", "tree1", "tree2", "pair")), by=c("var2"=".variable")) %>% 
-  mutate(inter_sp=ifelse(spp1=="pj", as.character(spp2), as.character(spp1))) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y, 
-         as.character(tree1.x)==as.character(tree1.y)|as.character(tree1.x)==as.character(tree2)) %>% 
-  mutate(diff=.value.x-.value.y,
-         intra_greater=ifelse(diff>0, 1,0))
-
-ppgrid <- expand_grid(ppdat$.variable[which(ppdat$comp=="intra")], ppdat$.variable[which(ppdat$comp=="inter")]) %>% 
-  rename(var1=1, var2=2) %>% 
-  inner_join(dplyr::select(ppdat, c("var1"=".variable", ".value", "Site", "Neighborhood", "intra_sp"="spp1","tree1", "pair"))) %>% 
-  inner_join(dplyr::select(ppdat, c(".variable", ".value", "Site", "Neighborhood", "spp1", "spp2", "tree1", "tree2", "pair")), by=c("var2"=".variable")) %>% 
-  mutate(inter_sp=ifelse(spp1=="pj", as.character(spp2), as.character(spp1))) %>% 
-  filter(Site.x==Site.y, Neighborhood.x==Neighborhood.y, 
-         as.character(tree1.x)==as.character(tree1.y)|as.character(tree1.x)==as.character(tree2)) %>% 
-  mutate(diff=.value.x-.value.y,
-         intra_greater=ifelse(diff>0, 1,0))
+## match interspecific correlations
+match4 <- inner_join(match3, cor_data, by=c("tree1.y"="tree1", "tree2.y"="tree2"))
+match5 <- inner_join(match3, cor_data, by=c("tree1.y"="tree2", "tree2.y"="tree1"))
+match6 <- bind_rows(match4, match5)
 
 
-allgrid <- bind_rows(list(acgrid, pjgrid, plgrid, ppgrid)) %>% 
-  dplyr::select(var1, var2, intra_cor=.value.x, Site=Site.x, Neighborhood=Neighborhood.x, 
-                intra_sp, tree1=tree1.x, inter_cor=.value.y, inter_sp, intra_greater)
+all_cor <- match6 %>% 
+  mutate(med_diff=.value.x-.value.y,
+         lower_diff=.lower.x-.lower.y,
+         upper_diff=.upper.x-.upper.y,
+         intra_greater=ifelse(med_diff>0, 1, 0),
+         interval_intra_greater=ifelse(lower_diff>0&upper_diff>0, 1,0)) %>% 
+  dplyr::select(-c(spp2.x, spp1.y)) %>% 
+  rename(intra_spp=spp1.x, inter_spp=spp2.y)
 
+num_or_char <- function(x)  ifelse(is.numeric(x), mean(x), first(x))
 
-intra_inter_summ <- allgrid %>% 
-  mutate(Neighborhood=as.factor(Neighborhood)) %>% 
-  group_by(tree1, Site, Neighborhood, intra_sp, inter_sp) %>% 
-  summarise(med_intra_corr=median(intra_cor),
-            med_inter_corr=median(inter_cor),
-            intra_greater=sum(intra_greater),
-            trials=length(intra_sp),
-            prop=intra_greater/trials)
+id_cor_summ <- all_cor %>% 
+  dplyr::select(-c(tree2.x, tree1.y, tree2.y, .variable.x, .variable.y)) %>% 
+  group_by(Region, Site, hilo, Neighborhood, intra_spp, inter_spp, tree1.x) %>% 
+  mutate(intra_greater=sum(intra_greater),
+         interval_intra_greater=sum(interval_intra_greater),
+         trials=length(intra_greater),
+         prop=intra_greater/trials) %>% 
+  summarise_all(num_or_char)
 
-test_mod <- brm(intra_greater|trials(trials)~ 1, data=intra_inter_summ, family=binomial, cores=4)
-test_mod2 <- brm(intra_greater|trials(trials)~ intra_sp + Site, data=intra_inter_summ, family=binomial, cores=4)
-marginal_effects(test_mod2)
-
-test_mod23 <- brm(intra_greater|trials(trials)~ (1|intra_sp) + (1|Site), data=intra_inter_summ, family=binomial, cores=4)
-
-
+## export Raa > Rab dataframe----
+write.csv(all_cor, "Processed Data/inta_inter_pairwise_all.csv", row.names = F)
+write.csv(id_cor_summ, "Processed Data/inta_inter_pairwise_summary.csv", row.names = F)
 
