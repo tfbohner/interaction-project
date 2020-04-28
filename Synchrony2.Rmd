@@ -218,7 +218,7 @@ We wanted to test the relationship between the pairwise correlations and distanc
 
 ```{r sync_mixed_model}
 pair_mod10 <- readRDS("saved models/sync_mods/pair_mod10.rds")
-
+  
 dat_post <- pair_mod10 %>% 
   spread_draws(b_Intercept, `r_Site:pair`[comp,]) %>% 
   mutate(comp_med=b_Intercept + `r_Site:pair`) %>% 
@@ -266,6 +266,16 @@ ggplot(pred_dat, aes(y = interaction(Region, hilo, lex.order=TRUE), x = .value, 
   ylab("Site") +
   theme(legend.position = 'none')
 
+dat_post <- pair_mod10 %>% 
+  gather_draws(b_dist, b_sizeratio)
+
+params <- ggplot(dat_post, aes(x=.value, y=.variable)) +
+  geom_halfeyeh() +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() +
+  ylab("parameter") +
+  xlab("estimate")
+
  pred_dat <- sync_mod_dat %>% 
   group_by(Site, pair) %>% 
   data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.025, 0.25, 0.5, 0.75, 0.975)), digits=2), 
@@ -302,7 +312,7 @@ ratio <- ggplot(pred_dat, aes(x = sizeratio, y = .value)) +
   theme(legend.position = 'none') +
   xlab("Size Ratio")
 
-plot_grid(dist, ratio, nrow=1)
+plot_grid(params, plot_grid(dist, ratio, nrow=1), nrow=2)
 
 ```
 
