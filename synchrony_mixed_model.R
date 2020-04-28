@@ -84,6 +84,8 @@ dat <- alldata %>%
   filter(!is.na(sizeratio)) %>% 
   mutate(cor=.value)
 
+write.csv(dat, "Processed Data/data_for_sync_mod.csv")
+
 pair_mod10a <-  update(pair_mod10, formula= ~ . - sizeratio, newdata=dat, cores=4, control=list(adapt_delta=0.99, max_treedepth=13))
 pair_mod10b <-  update(pair_mod10, formula= ~ . - dist, newdata=dat, cores=4, control=list(adapt_delta=0.99, max_treedepth=13))
 pair_mod10c <-  update(pair_mod10, formula= ~ . - sizeratio - dist, newdata=dat, cores=4, control=list(adapt_delta=0.99, max_treedepth=13))

@@ -43,9 +43,7 @@ bern_mod5 <- brm(intra_greater~ 1 + pair2 + (1|Region) + (1|tree1.x), data=all_c
 bern_mod6 <- brm(intra_greater~ 1 + (1|intra_spp/pair2) + (1|Region) + (1|tree1.x), data=all_cor, family=bernoulli, cores=4, control=list(adapt_delta=0.99))
 bern_mod7 <- brm(intra_greater~ 1 + (1|Region/intra_spp/pair2) + (1|tree1.x), data=all_cor, family=bernoulli, cores=4, control=list(adapt_delta=0.99))
 bern_mod8 <- brm(intra_greater~ 1 + (1|intra_spp/pair2/Region) + (1|tree1.x), data=all_cor, family=bernoulli, cores=4, control=list(adapt_delta=0.99))
-bern_mod8 <- brm(intra_greater~ 1 + (1|intra_spp/pair2/Region) + (1|tree1.x), data=all_cor, family=bernoulli, cores=4, control=list(adapt_delta=0.99))
-bern_mod9 <- brm(intra_greater~ 1 + (1|intra_spp/pair2/Region) + (1|tree1.x), data=all_cor, family=bernoulli, cores=4, control=list(adapt_delta=0.99))
-
+bern_mod9 <- brm(intra_greater~ 1 + (1|Site/intra_spp/pair2) + (1|tree1.x), data=all_cor, family=bernoulli, cores=4, control=list(adapt_delta=0.99))
 
 for(i in 6:7) {
   mod <- paste0("bern_mod",i)
@@ -53,11 +51,12 @@ for(i in 6:7) {
   assign(paste0("l", i), l)
 }
 
-loo_model_weights(list(l6, l7), method='stack')
+loo_model_weights(list(l6, l7, l9), method='pseudobma')
 
 saveRDS(bern_mod6, "saved models/intra_greater_mods/bern_mod6.rds")
 
-saveRDS(bern_mod7, "saved models/intra_greater_mods/bern_mo7.rds")
+saveRDS(bern_mod7, "saved models/intra_greater_mods/bern_mod7.rds")
+saveRDS(bern_mod9, "saved models/intra_greater_mods/bern_mod9.rds")
 
 ## Visualize model results----library(viridis)
 library(tidybayes)

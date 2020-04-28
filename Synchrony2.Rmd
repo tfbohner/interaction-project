@@ -29,19 +29,22 @@ library(viridis)
 library(scales)
 library(cowplot)
 library(ggridges)
+library(ggstance)
+library(modelr)
+
 ```
 
 ## Overview
 
 ### Questions
-- How does synchrony of tree growth vary across regional/elevation gradients?
--- Prediction: higher synchrony in lower latitude and lower elevation (drier) populations (SIASH, dendrochronological principles)
+1.  How does synchrony of tree growth vary across regional/elevation gradients?
+Prediction: higher synchrony in lower latitude and lower elevation (drier) populations (SIASH, dendrochronological principles)
 
-- Within populations is intraspecific synchrony greater than interspecific synchrony? Between specific species pairs? With increasing distance?
--- Prediction: higher synchrony among intraspecific pairs, potentially higher synchrony between pine pairs versus pine-fir pairs (successional stages), and lower synchrony with increasing distance
+2.  Within populations is intraspecific synchrony greater than interspecific synchrony? Between specific species pairs? With increasing distance?
+Prediction: higher synchrony among intraspecific pairs, potentially higher synchrony between pine pairs versus pine-fir pairs (successional stages), and lower synchrony with increasing distance
 
-- How has synchrony changed through time? Are changes more dramatic in certain populations? Is increased or decreased synchrony associated with certain environmental variables?
--- Prediction: synchrony has increased with time, increased synchrony associated with drier, more variable time windows, changes are more pronounced in xeric populations.
+3.  How has synchrony changed through time? Are changes more dramatic in certain populations? Is increased or decreased synchrony associated with certain environmental variables?
+Prediction: synchrony has increased with time, increased synchrony associated with drier, more variable time windows, changes are more pronounced in xeric populations.
 
 Synchrony is explored here through residual correlations betweeen trees from multivariate models of tree growth.
 ```{r data}
@@ -65,21 +68,29 @@ region <- rings_field %>%
   ungroup() %>% 
   dplyr::select(c(Site, Region, hilo)) %>% 
   group_by(Site) %>% 
-  summarize_all(first)
+  summarize_all(first) %>% 
+  mutate(Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth")))
 
 ids <- ungroup(rings_field) %>% 
   dplyr::select(c(Site, Neighborhood, tree.uniqueID)) %>% 
   group_by(Site, Neighborhood, tree.uniqueID) %>%  summarize_all(first)
 
 bigvars2 <- read.csv("Processed Data/synchrony_multivar.csv")
-bigdraws2 <- read.csv("Processed Data/synchrony_multivar_draws.csv")
+# bigdraws2 <- read.csv("Processed Data/synchrony_multivar_draws.csv")
 bigvars_t2 <- read.csv("Processed Data/synchrony_decadal.csv") 
+
+sync_mod_dat <- read.csv("Processed Data/data_for_sync_mod.csv")
+
+all_cor <- read.csv("Processed Data/inta_inter_pairwise_all.csv") %>% 
+  mutate(pair2 =str_c(intra_spp,inter_spp, sep="-"))
   
 ```
 
 ## Q2 Intra-interspecific competition
 
+We modeled the annual growth increment of all of the trees in a given neighborhood jointly to estimate their residual correlations (similar to calculating pearsons pairwise correlations).
 
+### Pairwise residual correlation summaires: 
 ``` {r funs_and_manip}
 ## function to extract data at the species level----
 spp_subsetter <- function(data, sp) {
@@ -111,14 +122,15 @@ pldat <- spp_subsetter(bigvars2, "pl")
 ppdat <- spp_subsetter(bigvars2, "pp")
 
 
-acdat <- spp_subsetter(bigdraws2, "ac")
-pjdat <- spp_subsetter(bigdraws2, "pj")
-pldat <- spp_subsetter(bigdraws2, "pl")
-ppdat <- spp_subsetter(bigdraws2, "pp")
+# acdat <- spp_subsetter(bigdraws2, "ac")
+# pjdat <- spp_subsetter(bigdraws2, "pj")
+# pldat <- spp_subsetter(bigdraws2, "pl")
+# ppdat <- spp_subsetter(bigdraws2, "pp")
 
 ```
 
 *note difference in distribution with when keeping all of the draws versus summarizing median correlations. 
+
 
 ```{r fig}
 
@@ -129,11 +141,11 @@ ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
   geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
   facet_grid(spp2~spp1)
 
-ggplot(bigdraws2, aes(.value, color=comp, fill=comp)) +
-  geom_density(position = "identity", alpha=0.4) +
-  theme_test() +
-  geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
-  facet_grid(spp2~spp1)
+# ggplot(bigdraws2, aes(.value, color=comp, fill=comp)) +
+#   geom_density(position = "identity", alpha=0.4) +
+#   theme_test() +
+#   geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
+#   facet_grid(spp2~spp1)
 
 # show_col(viridis_pal()(5)) # get the hex codes for the colors
 
@@ -199,6 +211,152 @@ legend <- cowplot::get_legend(dummy)
 # plot_grid(legend)
 
 plot_grid(plot_grid(p1,p2,p3,p4, ncol=2), legend, ncol=2, rel_widths = c(1,.2))
+```
+
+### Correlation response model: 
+We wanted to test the relationship between the pairwise correlations and distance, size ratios, species-pairs, and locations of all of the trees. We built hierarchical mixed models with the pairwise correlations as a responses (normal). 
+
+```{r sync_mixed_model}
+pair_mod10 <- readRDS("saved models/sync_mods/pair_mod10.rds")
+
+dat_post <- pair_mod10 %>% 
+  spread_draws(b_Intercept, `r_Site:pair`[comp,]) %>% 
+  mutate(comp_med=b_Intercept + `r_Site:pair`) %>% 
+  dplyr::select(-c(b_Intercept, `r_Site:pair`)) %>% 
+  median_qi() %>% 
+  mutate(Site=str_sub(comp, 1,2),
+         pair=str_sub(comp, 4,8),
+         spp1=str_sub(pair, 1,2),
+         spp2=str_sub(pair, 4,5)) %>% 
+  left_join(region, by="Site")
+
+
+ggplot(dat_post, aes(y=interaction(Region, hilo, lex.order=TRUE), x=comp_med, color=Region)) +
+  geom_pointintervalh(position = position_dodgev(-0.4)) +
+  scale_color_viridis(discrete=T, option='plasma', direction = -1) +
+  facet_grid(spp1~spp2) +
+  theme_test() +
+  scale_x_continuous(labels = scales::number_format(accuracy = 0.1)) +
+  xlab("posterior median Rij") +
+  ylab("Site") +
+  theme(legend.position = 'none')
+
+
+pred_dat <- sync_mod_dat %>% 
+  group_by(Site, pair) %>% 
+  data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.5)), digits=2), 
+            sizeratio=round(quantile(sync_mod_dat$sizeratio, probs=c(0.5)), digits=2)) %>% 
+  add_fitted_draws(pair_mod10, n=100, re_formula = NULL, allow_new_levels=TRUE) %>% 
+  mutate(spp1=str_sub(pair, 1,2),
+         spp2=str_sub(pair, 4,5),
+         .value=.value) %>% 
+  left_join(region, by="Site") 
+
+## check out predicted data 
+ggplot(pred_dat, aes(y = interaction(Region, hilo, lex.order=TRUE), x = .value, color=Region)) +
+  stat_pointintervalh(.width = 0.95) +
+  # geom_violinh(aes(x = .value)) +
+  facet_grid(spp1~spp2) +
+  scale_color_viridis(discrete=TRUE, option='plasma', direction = -1) +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  # ylim(-.4, .4) +
+  theme_test() +
+  xlab("predicted correlation (Rij)")  +
+  ylab("Site") +
+  theme(legend.position = 'none')
+
+ pred_dat <- sync_mod_dat %>% 
+  group_by(Site, pair) %>% 
+  data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.025, 0.25, 0.5, 0.75, 0.975)), digits=2), 
+            sizeratio=round(quantile(sync_mod_dat$sizeratio, probs=c(0.5)), digits=2)) %>% 
+  add_fitted_draws(pair_mod10, n=100, re_formula = NULL, allow_new_levels=TRUE) %>% 
+  mutate(.value=.value)
+  
+dist <- ggplot(pred_dat, aes(x = dist, y = .value)) +
+  stat_lineribbon(aes(y = .value), .width = c(.95), alpha=0.2) +
+  stat_lineribbon(aes(y = .value), .width = c(.01)) +
+  scale_fill_brewer(palette = "Greys") +
+  scale_color_viridis(discrete=TRUE) +
+  # ylim(-.4, .4) +
+  theme_test() +
+  ylab("predicted correlation (Rij)") +
+  theme(legend.position = 'none') +
+  xlab("Distance")
+
+ pred_dat <- sync_mod_dat %>% 
+  group_by(Site, pair) %>% 
+  data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.5)), digits=2), 
+            sizeratio=round(quantile(sync_mod_dat$sizeratio, probs=c(0.025, 0.25, 0.5, 0.75, 0.975)), digits=2)) %>% 
+  add_fitted_draws(pair_mod10, n=100, re_formula = NULL, allow_new_levels=TRUE)  %>% 
+  mutate(.value=.value)
+  
+ratio <- ggplot(pred_dat, aes(x = sizeratio, y = .value)) +
+  stat_lineribbon(aes(y = .value), .width = c(.95), alpha=0.2) +
+  stat_lineribbon(aes(y = .value), .width = c(.01)) +
+  scale_fill_brewer(palette = "Greys") +
+  scale_color_viridis(discrete=TRUE) +
+  # ylim(-.4, .4) +
+  theme_test() +
+  ylab("predicted correlation (Rij)")  +
+  theme(legend.position = 'none') +
+  xlab("Size Ratio")
+
+plot_grid(dist, ratio, nrow=1)
+
+```
+
+### Fraction Raa>Rab model: 
+Next we wanted to know if the intraspecific correlations were significantly larger than the interspecific correlations and how much the species pair and/or geographic location mattered.
+
+```{r fraction_intra_model}
+bern_mod9 <- readRDS("saved models/intra_greater_mods/bern_mod9.rds")
+
+dat_post <- bern_mod9 %>% 
+  spread_draws(b_Intercept, `r_Site:intra_spp:pair2`[comp,]) %>% 
+  mutate(comp_med=inv_logit_scaled(b_Intercept + `r_Site:intra_spp:pair2`)) %>% 
+  dplyr::select(-c(b_Intercept, `r_Site:intra_spp:pair2`)) %>% 
+  median_qi() %>% 
+  # mutate(Region=str_split_fixed(comp, "_", 3)[,1],
+  #        intra_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 1,2),
+  #        inter_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 4,5),
+  #        Region=str_replace(Region, "\\.", " ")) %>% 
+  mutate(Site=str_sub(comp, 1,2),
+         intra_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 1,2),
+         inter_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 4,5)) %>% 
+  left_join(region, by="Site")
+
+
+ggplot(dat_post, aes(y=reorder(intra_spp, desc(intra_spp)), x=comp_med, 
+                     color=interaction(Region, hilo, lex.order=TRUE))) +
+  geom_pointintervalh(position = position_dodgev(-0.4)) +
+  scale_color_viridis(discrete=T, option='plasma', direction = -1) +
+  geom_vline(xintercept=0.5, linetype="dashed") +
+  facet_grid(~inter_spp) +
+  theme_test() +
+  scale_x_continuous(labels = scales::number_format(accuracy = 0.01)) +
+  xlab("posterior median proportion of intra > inter correlations") +
+  ylab("Intraspecific species pair") +
+  theme(legend.position = 'none')
+
+pred_dat <- all_cor %>% 
+  group_by(Site, intra_spp, pair2) %>% 
+  data_grid(intra_greater) %>% 
+  add_fitted_draws(bern_mod9, re_formula = ~(1|Site/intra_spp/pair2), allow_new_levels=TRUE) %>% 
+  mutate(.value=inv_logit_scaled(.value),
+         spp1=str_sub(pair2, 1,2),
+         spp2=str_sub(pair2, 4,5))
+
+## check out predicted data 
+ggplot(pred_dat, aes(x = spp2, y = .value, fill=spp2)) +
+  geom_violin(aes(y = .value)) +
+  facet_grid(~spp1) +
+  scale_fill_viridis(discrete=TRUE) +
+  # scale_alpha_ordinal(range=c(0.3,1)) +
+  geom_hline(yintercept = 0.5, linetype="dashed") +
+  # ylim(-.4, .4) +
+  theme_test() +
+  ylab("predicted proportion of intra > inter correlations") 
+
 ```
 
 ## Q3 Synchrony through time
