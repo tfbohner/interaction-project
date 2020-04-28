@@ -6,7 +6,7 @@ knit: (function(input_file, encoding) {
  encoding=encoding,
  output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 author: "Teresa Bohner"
-date: "3/30/2020"
+date: "4/28/2020"
 output: 
   html_document:
     toc: true
@@ -237,7 +237,7 @@ ggplot(dat_post, aes(y=interaction(Region, hilo, lex.order=TRUE), x=comp_med, co
   facet_grid(spp1~spp2) +
   theme_test() +
   scale_x_continuous(labels = scales::number_format(accuracy = 0.1)) +
-  xlab("posterior median Rij") +
+  xlab("posterior median intercept") +
   ylab("Site") +
   theme(legend.position = 'none')
 
@@ -256,12 +256,13 @@ pred_dat <- sync_mod_dat %>%
 ggplot(pred_dat, aes(y = interaction(Region, hilo, lex.order=TRUE), x = .value, color=Region)) +
   stat_pointintervalh(.width = 0.95) +
   # geom_violinh(aes(x = .value)) +
+  geom_vline(xintercept=0, linetype="dashed")+
   facet_grid(spp1~spp2) +
   scale_color_viridis(discrete=TRUE, option='plasma', direction = -1) +
   geom_hline(yintercept = 0, linetype="dashed") +
   # ylim(-.4, .4) +
   theme_test() +
-  xlab("predicted correlation (Rij)")  +
+  xlab("conditional effect")  +
   ylab("Site") +
   theme(legend.position = 'none')
 
