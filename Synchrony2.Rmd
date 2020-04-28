@@ -305,11 +305,12 @@ plot_grid(dist, ratio, nrow=1)
 
 ```
 
-### Fraction Raa>Rab model: 
-Next we wanted to know if the intraspecific correlations were significantly larger than the interspecific correlations and how much the species pair and/or geographic location mattered.
+### Fraction intraspecific > interspecific model: 
+Next we wanted to know if the intraspecific correlations were significantly larger than the interspecific correlations and how much the species pair and/or geographic location mattered. Bernoulli error distribution with individual as group effect (as opposed to doing an aggregated binomial model...does this make sense?).  Data is in the form of a matrix for every individual tree of the comparison between the correlations between it and all of it's intraspecific neighbors and all of the interspecific neighbors.
 
 ```{r fraction_intra_model}
 bern_mod9 <- readRDS("saved models/intra_greater_mods/bern_mod9.rds")
+head(dplyr::select(all_cor, c(tree1.x, tree2.x, comp.x, .value.x, tree1.y, tree2.y, comp.y, .value.y, intra_greater)))
 
 dat_post <- bern_mod9 %>% 
   spread_draws(b_Intercept, `r_Site:intra_spp:pair2`[comp,]) %>% 
