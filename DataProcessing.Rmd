@@ -232,8 +232,13 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   raw <- treeave
   raw$Year <- as.numeric(rownames(raw))
   
+  interseries.cor(temp, prewhiten = T)
+  corr.rwl.seg(temp,prewhiten = T)
+  rwi.stats.running(raw, prewhiten=T)
+  
   bai <- bai.out(raw, diam = NULL)
   bai$Year <- as.numeric(rownames(bai))
+  rwi.stats(bai, prewhiten=T)
   
   ar <- detrend(rwl = treeave, method="Ar")
   ar$Year <- as.numeric(rownames(ar))
@@ -241,12 +246,18 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   nexp <- detrend(rwl = treeave, method="ModNegExp")
   nexp$Year <- as.numeric(rownames(nexp))
   
+  rwi.stats(nexp, prewhiten=T)
+  
   spl <- detrend(rwl = treeave, method="Spline")
   spl$Year <- as.numeric(rownames(spl))
+  
+  rwi.stats(spl, prewhiten=T)
   
   fss <- detrend(rwl = treeave, method="Friedman")
   fss_ar <- detrend(fss, method="Ar")
   fss$Year <- as.numeric(rownames(fss))
+  
+  rwi.stats(fss, prewhiten=T)
   
   dat<- gather(zero, key="tree", "temp", -Year) %>%
     mutate(zeroRing=ifelse(temp==0, "yes", "no")) %>% 
@@ -334,10 +345,24 @@ loc_data <- raw_loc %>%
 #   filter(Site=="Black Mountain") %>%
 #   filter(Neighborhood==3)
 
+loc_grid <- loc_data %>% 
+  rename(Site.x=Site, Neighborhood.x=Neighborhood, tree.uniqueID.x=tree.uniqueID, X.x=X, Y.x=Y) %>% 
+  expand_grid(dplyr::select(loc_data, c(Site, Neighborhood, tree.uniqueID, X, Y))) %>% 
+  filter(Site.x==Site, Neighborhood.x==Neighborhood) %>% 
+  dplyr::select(-c(Site.x, Neighborhood.x)) 
+
+loc_grid2 <- loc_grid %>% 
+  mutate(dist_m=distGeo(dplyr::select(loc_grid, c(X.x, Y.x)), dplyr::select(loc_grid, c(X, Y))),
+         bearing_deg=round(bearing(dplyr::select(loc_grid, c(X.x, Y.x)), dplyr::select(loc_grid, c(X, Y))), 2))
+
 xy <- dplyr::select(loc_data, c(X, Y))
 pair <- data.frame(distm(xy, fun=distGeo)) %>% ## calculates distance in m based on WGS84 elipsoid
   mutate(tree.uniqueID=loc_data$tree.uniqueID)
 names(pair) <- c(loc_data$tree.uniqueID, "focalID")
+
+test <- xy %>% 
+  mutate(bearing_deg=round(bearing(xy), 2)) %>% 
+  left_join(loc_data)
 
 dist_focal <- pair %>% 
   pivot_longer(cols=-focalID, names_to="periphID", values_to="dist") %>% 
@@ -393,15 +418,15 @@ rings_field <- rings_field %>%
 
 for(i in unique(rings_field$Region)){
   tree_sub <- filter(rings_field, Region==i) %>% 
-      filter(Year>=max(minyear)) %>%
-      select(tree.uniqueID, Year, spline_growth) %>% 
+      # filter(Year>=max(minyear)) %>%
+      dplyr::select(tree.uniqueID, Year, spline_growth) %>% 
       pivot_wider(names_from="tree.uniqueID", values_from="spline_growth") 
     
     if(dim(tree_sub)[1]==0){    
       cordf <- NA
     } else {
         treemat <-tree_sub %>% 
-          select(-Year) %>%  as.matrix()
+          dplyr::select(-Year) %>%  as.matrix()
 
         cormat <- rcorr(treemat, type='pearson')$r
         cormat[upper.tri(cormat)] <- NA
@@ -415,34 +440,87 @@ for(i in unique(rings_field$Region)){
       } else all_cordf <- rbind(all_cordf, cordf)
 }
 
-sub <- select(rings_field, c(tree.uniqueID, Site, Species, Region, hilo, DBH, con_freq, con_freqBA)) %>% 
+sub <- dplyr::select(rings_field, c(tree.uniqueID, Site, Species, Region, hilo, Neighborhood, DBH, con_freq, con_freqBA)) %>% 
   group_by(tree.uniqueID) %>% 
   summarise_all(first)
 
-dist_mat2 <- select(dist_long, c(focalID, periphID, dist)) %>% 
+dist_mat2 <- dplyr::select(dist_focal, c(focalID, periphID, dist)) %>% 
   rename(tree1=focalID, tree2=periphID)
 
 all_cordf2 <- all_cordf %>% 
   na.omit() %>% 
-  mutate_at("tree1", as.character) %>% 
   left_join(sub, by=c("tree1"="tree.uniqueID")) %>% 
-  left_join(select(sub, c(tree.uniqueID, Site, Species)), by=c("tree2"="tree.uniqueID")) %>% 
-  left_join(dist_mat2)
+  left_join(dplyr::select(sub, c(tree.uniqueID, Site, Neighborhood, Species)), by=c("tree2"="tree.uniqueID")) %>% 
+  left_join(dist_mat2) %>% 
+  filter(Neighborhood.x==Neighborhood.y, Site.x==Site.y)
+
+
+all_cordf3 <- all_cordf2 %>% 
+  na.omit()
 
 
 write.csv(all_cordf2, "Processed Data/synchrony_dat.csv", row.names = F)
 
+
+for(i in unique(rings_field$Region)){
+  tree_sub <- filter(rings_field, Region==i) %>% 
+      dplyr::select(tree.uniqueID, Year, spline_growth) %>% 
+      pivot_wider(names_from="tree.uniqueID", values_from="spline_growth") 
+  
+  for(y in seq(1910, 2020, by=10)){
+    tree_sub2 <- tree_sub %>% 
+      filter(Year<=y, Year>=(y-29))
+    if(dim(tree_sub2)[1]<20){    
+      cordf <- data.frame(tree1=NA, tree2=NA, pearson_r=NA, decade=y)
+    } else {
+        treemat <-tree_sub2 %>% 
+          dplyr::select(-Year) %>%  as.matrix()
+
+        cormat <- rcorr(treemat, type='pearson')$r
+        cormat[upper.tri(cormat)] <- NA
+
+       cordf <- melt(cormat) %>% filter(value!=1&!is.na(value)) %>% 
+         rename(tree1=Var1, tree2=Var2, pearson_r=value) %>% 
+         mutate(decade=y)
+      }
+
+    
+    if(i=="San Jac"& y==1910){all_cordf <- cordf
+      } else all_cordf <- rbind(all_cordf, cordf)
+}}
+
+sub <- dplyr::select(rings_field, c(tree.uniqueID, Site, Species, Region, hilo, Neighborhood, DBH, con_freq, con_freqBA)) %>% 
+  group_by(tree.uniqueID) %>% 
+  summarise_all(first)
+
+dist_mat2 <- dplyr::select(dist_focal, c(focalID, periphID, dist)) %>% 
+  rename(tree1=focalID, tree2=periphID)
+
+all_cordf2 <- all_cordf %>% 
+  na.omit() %>% 
+  left_join(sub, by=c("tree1"="tree.uniqueID")) %>% 
+  left_join(dplyr::select(sub, c(tree.uniqueID, Site, Neighborhood, Species)), by=c("tree2"="tree.uniqueID")) %>% 
+  left_join(dist_mat2) %>% 
+  filter(Neighborhood.x==Neighborhood.y, Site.x==Site.y)
+
+
+all_cordf3 <- all_cordf2 %>% 
+  na.omit()
+
+
+write.csv(all_cordf2, "Processed Data/synchrony_decadal_pearson.csv", row.names = F)
+
 for(i in unique(rings_field$Region)){
   tree_sub <- filter(rings_field, Region==i) %>% 
       filter(Year>=max(minyear)) %>%
-      select(tree.uniqueID, Year, raw_growth) %>% 
+      dplyr::select(tree.uniqueID, Year, raw_growth) %>% 
       pivot_wider(names_from="tree.uniqueID", values_from="raw_growth") 
     
     if(dim(tree_sub)[1]==0){    
       cordf <- NA
     } else {
         treemat <-tree_sub %>% 
-          select(-Year) %>%  as.matrix()
+          dplyr::select(-Year) %>%  as.matrix()
 
         cormat <- rcorr(treemat, type='pearson')$r
         cormat[upper.tri(cormat)] <- NA
@@ -461,9 +539,11 @@ all_cordf_raw <- all_cordf %>%
   na.omit() %>% 
   mutate_at("tree1", as.character) %>% 
   left_join(sub, by=c("tree1"="tree.uniqueID")) %>% 
-  left_join(select(sub, c(tree.uniqueID, Site, Species)), by=c("tree2"="tree.uniqueID")) %>% 
-  left_join(dist_mat2)
+  left_join(dplyr::select(sub, c(tree.uniqueID, Site, Neighborhood, Species)), by=c("tree2"="tree.uniqueID")) %>% 
+  left_join(dist_mat2) %>% 
+  filter(Neighborhood.x==Neighborhood.y, Site.x==Site.y)
 
 write.csv(all_cordf_raw, "Processed Data/synchrony_raw.csv", row.names = F)
 
 ```
+

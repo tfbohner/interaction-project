@@ -98,6 +98,11 @@ l10d <- loo(pair_mod10d)
 
 loo_model_weights(list(l10, l10a, l10b, l10c), method = "stack")
 
+dat <- alldata %>% 
+  filter(!is.na(sizeratio)) %>% 
+  mutate(cor=.value,
+         dist=scale(dist),
+         sizeratio=scale(sizeratio))
 
 pair_mod10 <-  brm(cor ~ dist + sizeratio + (1|Site/pair), 
                    data=dat, cores=4, control=list(adapt_delta=0.99, max_treedepth=13))

@@ -19,6 +19,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(fig.path = "figures/")
 ```
 
 ```{r packages, message=FALSE, warning=FALSE}
@@ -48,22 +49,11 @@ Prediction: synchrony has increased with time, increased synchrony associated wi
 
 Synchrony is explored here through residual correlations betweeen trees from multivariate models of tree growth.
 ```{r data}
-precip <- read.csv("Processed Data/precip_temp_spei.csv")
-
-timeseq <- seq(1910, 2010, by=10)
-
-precip_summary <- expand_grid(precip, timeseq) %>% 
-  filter(Year-timeseq>-11, Year-timeseq<11) %>% 
-  group_by(Site, siteno, Neighborhood, hilo, timeseq) %>% 
-  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=mean, sd=sd))
-
 rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
-  left_join(precip) %>% 
   group_by(Site, Neighborhood, Species) %>% 
-  mutate(treeID=as.numeric(droplevels(as.factor(tree.uniqueID)))) %>% ## counter id if we want it rather than unique ID
-  arrange(Site, Neighborhood, Species, ID) 
+  mutate(comp_BA=BA_con+BA_het) %>%
+  arrange(Site, Neighborhood, Species, ID)
   
-
 region <- rings_field %>% 
   ungroup() %>% 
   dplyr::select(c(Site, Region, hilo)) %>% 
@@ -75,14 +65,61 @@ ids <- ungroup(rings_field) %>%
   dplyr::select(c(Site, Neighborhood, tree.uniqueID)) %>% 
   group_by(Site, Neighborhood, tree.uniqueID) %>%  summarize_all(first)
 
-bigvars2 <- read.csv("Processed Data/synchrony_multivar.csv")
-# bigdraws2 <- read.csv("Processed Data/synchrony_multivar_draws.csv")
-bigvars_t2 <- read.csv("Processed Data/synchrony_decadal.csv") 
+tree_data <- rings_field %>% 
+  group_by(tree.uniqueID) %>% 
+  summarise(DBH=first(DBH),
+            comp_BA=first(comp_BA))
 
-sync_mod_dat <- read.csv("Processed Data/data_for_sync_mod.csv")
+precip <- read.csv("Processed Data/precip_temp_spei.csv")
 
-all_cor <- read.csv("Processed Data/inta_inter_pairwise_all.csv") %>% 
-  mutate(pair2 =str_c(intra_spp,inter_spp, sep="-"))
+decade <- seq(1910, 2020, by=10)
+
+precip_summary <- expand_grid(precip, decade) %>% 
+  filter(Year-decade>-29, Year<=decade) %>% 
+  group_by(Site, siteno, Neighborhood, hilo, decade) %>% 
+  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=function(x) mean(x, na.rm=T), sd=function(x) sd(x, na.rm=T))) %>% 
+  left_join(region) %>% 
+  ungroup()
+
+spp_pairs <- expand_grid(Species.x=c("ac", "pj", "pl", "pp"), Species.y=c("ac", "pj", "pl", "pp")) %>% 
+  mutate(pair_first=str_c(Species.x, Species.y, sep="-"),
+         pair=c("ac-ac", "ac-pj", "ac-pl", "ac-pj", "ac-pj", "pj-pj", "pj-pl", "pj-pp", 
+                      "ac-pl", "pj-pl", "pl-pl", "pl-pp", "ac-pp", "pj-pp", "pl-pp", "pp-pp")) %>% 
+  dplyr::select(-c(pair_first))
+
+pearson <- read.csv("Processed Data/synchrony_dat.csv") %>% 
+  na.omit() %>% 
+  filter(Site.x !="ic") %>% 
+  mutate_at(vars(Species.x, Species.y), tolower) %>% 
+  left_join(spp_pairs) %>% 
+  mutate(spp1=str_sub(pair, 1,2),
+         spp2=str_sub(pair, 4,5),
+         comp=ifelse(Species.x==Species.y, "intra", "inter"))
+
+
+pearson_t <- read.csv("Processed Data/synchrony_decadal_pearson.csv") %>% 
+  na.omit() %>% 
+  filter(Site.x !="ic") %>% 
+  mutate_at(vars(Species.x, Species.y), tolower) %>% 
+  left_join(spp_pairs) %>% 
+  mutate(spp1=str_sub(pair, 1,2),
+         spp2=str_sub(pair, 4,5),
+         comp=ifelse(Species.x==Species.y, "intra", "inter"))
+
+## join all data ----
+alldata <- pearson %>% 
+  left_join(tree_data, by=c("tree2"="tree.uniqueID")) %>% 
+  mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x),
+         Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth"))) %>% 
+  mutate_at(vars(dist, sizeratio, comp_BA), scale)
+
+alldata_t <- pearson_t %>% 
+  left_join(tree_data, by=c("tree2"="tree.uniqueID")) %>% 
+  mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x),
+         Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth"))) %>% 
+  mutate_at(vars(dist, sizeratio, comp_BA), scale) %>% 
+  left_join(dplyr::select(precip_summary, -c(Region, hilo)), by=c('Site.x'='Site', 'decade'='decade'))
+
   
 ```
 
@@ -112,20 +149,15 @@ spp_subsetter <- function(data, sp) {
 }
 
 ## summary data for median correlation
-summary <- group_by(bigvars2, spp1, spp2, comp) %>% 
-  summarise(med=median(.value))
+summary <- group_by(alldata, spp1, spp2, pair) %>% 
+  summarise(med=median(pearson_r))
 
 ## subset species----
-acdat <- spp_subsetter(bigvars2, "ac")
-pjdat <- spp_subsetter(bigvars2, "pj")
-pldat <- spp_subsetter(bigvars2, "pl")
-ppdat <- spp_subsetter(bigvars2, "pp")
+acdat <- spp_subsetter(alldata, "ac")
+pjdat <- spp_subsetter(alldata, "pj")
+pldat <- spp_subsetter(alldata, "pl")
+ppdat <- spp_subsetter(alldata, "pp")
 
-
-# acdat <- spp_subsetter(bigdraws2, "ac")
-# pjdat <- spp_subsetter(bigdraws2, "pj")
-# pldat <- spp_subsetter(bigdraws2, "pl")
-# ppdat <- spp_subsetter(bigdraws2, "pp")
 
 ```
 
@@ -133,73 +165,55 @@ ppdat <- spp_subsetter(bigvars2, "pp")
 
 
 ```{r fig}
-
 ## matrix style figure
-ggplot(bigvars2, aes(.value, color=comp, fill=comp)) +
-  geom_density(position = "identity", alpha=0.4) +
+ggplot(alldata, aes(pearson_r, fill=comp)) +
+  geom_density(aes(y = ..scaled..), alpha=0.5) +
+  facet_grid(spp2~spp1) +
   theme_test() +
-  geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
-  facet_grid(spp2~spp1)
-
-# ggplot(bigdraws2, aes(.value, color=comp, fill=comp)) +
-#   geom_density(position = "identity", alpha=0.4) +
-#   theme_test() +
-#   geom_vline(data=summary, aes(xintercept = med), linetype="dashed") +
-#   facet_grid(spp2~spp1)
+  geom_vline(data=summary, aes(xintercept=med), linetype="dashed") +
+  ylab("proportion") + xlab("pearson correlation")
 
 # show_col(viridis_pal()(5)) # get the hex codes for the colors
-
+#440154FF
 cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF") ## keep species cols consistent
 
-p1 <- ggplot(acdat, aes(.value, color=comp_sp, fill=comp_sp)) +
+p1 <- ggplot(acdat, aes(pearson_r, color=comp_sp, fill=comp_sp)) +
   geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("A. concolor") +
   scale_fill_manual(values=cols) +
   scale_color_manual(values=cols) +
   theme(legend.position = 'none') +
-  xlab("Correlation")
+  xlab("pearson correlation")
 
-# acdat2 <- left_join(acdat, region) 
-# 
-# ggplot(acdat2, aes(.value, color=comp_sp, fill=comp_sp)) +
-#   geom_density(position = "identity", alpha=0.5) +
-#   theme_test() +
-#   ggtitle("A. concolor") +
-#   scale_fill_manual(values=cols) +
-#   scale_color_manual(values=cols) +
-#   theme(legend.position = 'none') +
-#   facet_grid(Region~hilo)+
-#   xlab("Correlation")
-
-p2 <- ggplot(pjdat, aes(.value, color=comp_sp, fill=comp_sp)) +
+p2 <- ggplot(pjdat, aes(pearson_r, color=comp_sp, fill=comp_sp)) +
   geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("P. jeffreyi") +
   scale_fill_manual(values=cols) +
   scale_color_manual(values=cols) +
   theme(legend.position = 'none') +
-  xlab("Correlation")
+  xlab("pearson correlation")
 
-p3 <- ggplot(pldat, aes(.value, color=comp_sp, fill=comp_sp)) +
+p3 <- ggplot(pldat, aes(pearson_r, color=comp_sp, fill=comp_sp)) +
   geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("P. lambertiana") +
   scale_fill_manual(values=cols) +
   scale_color_manual(values=cols) +
   theme(legend.position = 'none') +
-  xlab("Correlation")
+  xlab("pearson correlation")
 
-p4 <- ggplot(ppdat, aes(.value, color=comp_sp, fill=comp_sp)) +
+p4 <- ggplot(ppdat, aes(pearson_r, color=comp_sp, fill=comp_sp)) +
   geom_density(position = "identity", alpha=0.5) +
   theme_test() +
   ggtitle("P. ponderosa") +
   scale_fill_manual(values=cols) +
   scale_color_manual(values=cols) +
   theme(legend.position = 'none') +
-  xlab("Correlation")
+  xlab("pearson correlation")
 
-dummy <- ggplot(bind_rows(acdat, pjdat), aes(.value, color=comp_sp, fill=comp_sp)) +
+dummy <- ggplot(bind_rows(acdat, pjdat), aes(pearson_r, color=comp_sp, fill=comp_sp)) +
   geom_density(alpha=0.5) +
   theme_test() +
   ggtitle("P. lambertiana") +
@@ -217,263 +231,139 @@ plot_grid(plot_grid(p1,p2,p3,p4, ncol=2), legend, ncol=2, rel_widths = c(1,.2))
 We wanted to test the relationship between the pairwise correlations and distance, size ratios, species-pairs, and locations of all of the trees. We built hierarchical mixed models with the pairwise correlations as a responses (normal). 
 
 ```{r sync_mixed_model}
-pair_mod10 <- readRDS("saved models/sync_mods/pair_mod10.rds")
-  
-dat_post <- pair_mod10 %>% 
-  spread_draws(b_Intercept, `r_Site:pair`[comp,]) %>% 
-  mutate(comp_med=b_Intercept + `r_Site:pair`) %>% 
-  dplyr::select(-c(b_Intercept, `r_Site:pair`)) %>% 
-  median_qi() %>% 
-  mutate(Site=str_sub(comp, 1,2),
-         pair=str_sub(comp, 4,8),
-         spp1=str_sub(pair, 1,2),
-         spp2=str_sub(pair, 4,5)) %>% 
-  left_join(region, by="Site")
+mod12 <- readRDS("saved models/pearson models/mod12.rds")
 
-
-ggplot(dat_post, aes(y=interaction(Region, hilo, lex.order=TRUE), x=comp_med, color=Region)) +
-  geom_pointintervalh(position = position_dodgev(-0.4)) +
-  scale_color_viridis(discrete=T, option='plasma', direction = -1) +
-  facet_grid(spp1~spp2) +
-  theme_test() +
-  scale_x_continuous(labels = scales::number_format(accuracy = 0.1)) +
-  xlab("posterior median intercept") +
-  ylab("Site") +
-  theme(legend.position = 'none')
-
-
-pred_dat <- sync_mod_dat %>% 
-  group_by(Site, pair) %>% 
-  data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.5)), digits=2), 
-            sizeratio=round(quantile(sync_mod_dat$sizeratio, probs=c(0.5)), digits=2)) %>% 
-  add_fitted_draws(pair_mod10, n=100, re_formula = NULL, allow_new_levels=TRUE) %>% 
-  mutate(spp1=str_sub(pair, 1,2),
-         spp2=str_sub(pair, 4,5),
-         .value=.value) %>% 
-  left_join(region, by="Site") 
-
-## check out predicted data 
-ggplot(pred_dat, aes(y = interaction(Region, hilo, lex.order=TRUE), x = .value, color=Region)) +
-  stat_pointintervalh(.width = 0.95) +
-  # geom_violinh(aes(x = .value)) +
-  geom_vline(xintercept=0, linetype="dashed")+
-  facet_grid(spp1~spp2) +
-  scale_color_viridis(discrete=TRUE, option='plasma', direction = -1) +
-  geom_hline(yintercept = 0, linetype="dashed") +
-  # ylim(-.4, .4) +
-  theme_test() +
-  xlab("conditional effect")  +
-  ylab("Site") +
-  theme(legend.position = 'none')
-
-dat_post <- pair_mod10 %>% 
-  gather_draws(b_dist, b_sizeratio)
-
-params <- ggplot(dat_post, aes(x=.value, y=.variable)) +
-  geom_halfeyeh() +
+mod12 %>% 
+  gather_draws(b_dist, b_sizeratio) %>% 
+  median_qi(.width = c(.50, .95)) %>% 
+  ggplot(aes(y=.variable, x=.value)) +
+  geom_pointintervalh() +
   geom_vline(xintercept=0, linetype="dashed") +
-  theme_test() +
-  ylab("parameter") +
-  xlab("estimate")
+  theme_test() + ylab("") + xlab("parameter estimate")
 
- pred_dat <- sync_mod_dat %>% 
-  group_by(Site, pair) %>% 
-  data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.025, 0.25, 0.5, 0.75, 0.975)), digits=2), 
-            sizeratio=round(quantile(sync_mod_dat$sizeratio, probs=c(0.5)), digits=2)) %>% 
-  add_fitted_draws(pair_mod10, n=100, re_formula = NULL, allow_new_levels=TRUE) %>% 
-  mutate(.value=.value)
-  
-dist <- ggplot(pred_dat, aes(x = dist, y = .value)) +
-  stat_lineribbon(aes(y = .value), .width = c(.95), alpha=0.2) +
-  stat_lineribbon(aes(y = .value), .width = c(.01)) +
-  scale_fill_brewer(palette = "Greys") +
-  scale_color_viridis(discrete=TRUE) +
-  # ylim(-.4, .4) +
-  theme_test() +
-  ylab("predicted correlation (Rij)") +
-  theme(legend.position = 'none') +
-  xlab("Distance")
-
- pred_dat <- sync_mod_dat %>% 
-  group_by(Site, pair) %>% 
-  data_grid(cor, dist=round(quantile(sync_mod_dat$dist, probs=c(0.5)), digits=2), 
-            sizeratio=round(quantile(sync_mod_dat$sizeratio, probs=c(0.025, 0.25, 0.5, 0.75, 0.975)), digits=2)) %>% 
-  add_fitted_draws(pair_mod10, n=100, re_formula = NULL, allow_new_levels=TRUE)  %>% 
-  mutate(.value=.value)
-  
-ratio <- ggplot(pred_dat, aes(x = sizeratio, y = .value)) +
-  stat_lineribbon(aes(y = .value), .width = c(.95), alpha=0.2) +
-  stat_lineribbon(aes(y = .value), .width = c(.01)) +
-  scale_fill_brewer(palette = "Greys") +
-  scale_color_viridis(discrete=TRUE) +
-  # ylim(-.4, .4) +
-  theme_test() +
-  ylab("predicted correlation (Rij)")  +
-  theme(legend.position = 'none') +
-  xlab("Size Ratio")
-
-plot_grid(params, plot_grid(dist, ratio, nrow=1), nrow=2)
-
-```
-
-### Fraction intraspecific > interspecific model: 
-Next we wanted to know if the intraspecific correlations were significantly larger than the interspecific correlations and how much the species pair and/or geographic location mattered. Bernoulli error distribution with individual as group effect (as opposed to doing an aggregated binomial model...does this make sense?).  Data is in the form of a matrix for every individual tree of the comparison between the correlations between it and all of it's intraspecific neighbors and all of the interspecific neighbors.
-
-```{r fraction_intra_model}
-bern_mod9 <- readRDS("saved models/intra_greater_mods/bern_mod9.rds")
-head(dplyr::select(all_cor, c(tree1.x, tree2.x, comp.x, .value.x, tree1.y, tree2.y, comp.y, .value.y, intra_greater)))
-
-dat_post <- bern_mod9 %>% 
-  spread_draws(b_Intercept, `r_Site:intra_spp:pair2`[comp,]) %>% 
-  mutate(comp_med=inv_logit_scaled(b_Intercept + `r_Site:intra_spp:pair2`)) %>% 
-  dplyr::select(-c(b_Intercept, `r_Site:intra_spp:pair2`)) %>% 
-  median_qi() %>% 
-  # mutate(Region=str_split_fixed(comp, "_", 3)[,1],
-  #        intra_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 1,2),
-  #        inter_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 4,5),
-  #        Region=str_replace(Region, "\\.", " ")) %>% 
-  mutate(Site=str_sub(comp, 1,2),
-         intra_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 1,2),
-         inter_spp=str_sub(str_split_fixed(comp, "_", 3)[,3], 4,5)) %>% 
-  left_join(region, by="Site")
+mod12 %>% 
+  spread_draws(b_Intercept, r_pair[pair,]) %>% 
+  mutate(spp_mean=b_Intercept + r_pair) %>% 
+  median_qi(.width = c(.50, .95)) %>% 
+  ggplot(aes(y=pair, x=spp_mean, xmin=spp_mean.lower, xmax=spp_mean.upper)) +
+  geom_pointintervalh() +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() + ylab("") + xlab("Synchrony effect estimate")
 
 
-ggplot(dat_post, aes(y=reorder(intra_spp, desc(intra_spp)), x=comp_med, 
-                     color=interaction(Region, hilo, lex.order=TRUE))) +
-  geom_pointintervalh(position = position_dodgev(-0.4)) +
-  scale_color_viridis(discrete=T, option='plasma', direction = -1) +
-  geom_vline(xintercept=0.5, linetype="dashed") +
-  facet_grid(~inter_spp) +
-  theme_test() +
-  scale_x_continuous(labels = scales::number_format(accuracy = 0.01)) +
-  xlab("posterior median proportion of intra > inter correlations") +
-  ylab("Intraspecific species pair") +
-  theme(legend.position = 'none')
+mod12 %>% 
+  spread_draws(r_pair[pair,]) %>% 
+  compare_levels(r_pair, by = pair) %>%
+  median_qi(.width = c(.50, .95)) %>% 
+  mutate(pair1=str_sub(pair, 1,5),
+         pair1_spp1=str_sub(pair, 1,2),
+         pair1_spp2=str_sub(pair, 4,5),
+         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
+         pair2=str_sub(pair, 9,13),
+         pair2_spp1=str_sub(pair, 9,10),
+         pair2_spp2=str_sub(pair, 12,13),
+         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
+         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
+  filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
+  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         r_pair=ifelse(pair1_comp=="intra", r_pair, r_pair*-1),
+         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
+         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1)) %>% 
+  ggplot(aes(y = new_pair, x = r_pair)) +
+  geom_pointintervalh() +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate")
 
-pred_dat <- all_cor %>% 
-  group_by(Site, intra_spp, pair2) %>% 
-  data_grid(intra_greater) %>% 
-  add_fitted_draws(bern_mod9, re_formula = ~(1|Site/intra_spp/pair2), allow_new_levels=TRUE) %>% 
-  mutate(.value=inv_logit_scaled(.value),
-         spp1=str_sub(pair2, 1,2),
-         spp2=str_sub(pair2, 4,5))
+mod12 %>% 
+  spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[site,]) %>% 
+  mutate(spp_mean=b_Intercept + r_pair + `r_pair:Region:hilo`,
+         valid=str_detect(site, pair)) %>% 
+  filter(valid==1) %>% 
+  median_qi(.width = c(.50, .95)) %>%  
+  mutate(newsite=str_sub(site, start=7)) %>% 
+  ggplot(aes(y=pair, x=spp_mean, xmin=spp_mean.lower, xmax=spp_mean.upper, color=newsite)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() + ylab("") + xlab("Synchrony effect estimate")
 
-## check out predicted data 
-ggplot(pred_dat, aes(x = spp2, y = .value, fill=spp2)) +
-  geom_violin(aes(y = .value)) +
-  facet_grid(~spp1) +
-  scale_fill_viridis(discrete=TRUE) +
-  # scale_alpha_ordinal(range=c(0.3,1)) +
-  geom_hline(yintercept = 0.5, linetype="dashed") +
-  # ylim(-.4, .4) +
-  theme_test() +
-  ylab("predicted proportion of intra > inter correlations") 
+mod12 %>% 
+  spread_draws(r_pair[pair,], `r_pair:Region:hilo`[site,]) %>% 
+  mutate(spp_mean=r_pair + `r_pair:Region:hilo`,
+         valid=str_detect(site, pair)) %>% 
+  filter(valid==1) %>% 
+  mutate(newsite=str_sub(site, start=7)) %>% 
+  group_by(newsite) %>% 
+  compare_levels(spp_mean, by = pair) %>%
+  median_qi(.width = c(.50, .95)) %>%  
+  mutate(pair1=str_sub(pair, 1,5),
+         pair1_spp1=str_sub(pair, 1,2),
+         pair1_spp2=str_sub(pair, 4,5),
+         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
+         pair2=str_sub(pair, 9,13),
+         pair2_spp1=str_sub(pair, 9,10),
+         pair2_spp2=str_sub(pair, 12,13),
+         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
+         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
+  filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
+  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         spp_mean=ifelse(pair1_comp=="intra", spp_mean, spp_mean*-1),
+         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
+         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1)) %>% 
+  ggplot(aes(y = new_pair, x = spp_mean, color=newsite)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate")
 
 ```
+
 
 ## Q3 Synchrony through time
-Used 20 year time blocks overlapping 10 years
+Used 30 year time blocks with a 10 year lag
 
 
+```{r exploratory}
+ggplot(alldata_t, aes(decade, pearson_r, color=Region)) +
+  stat_summary(aes(group=interaction(Region, hilo)), geom="pointrange") +
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
-```{r time_manip}
-## subset species----
-acdat <- spp_subsetter(bigvars_t2, "ac")
-pjdat <- spp_subsetter(bigvars_t2, "pj")
-pldat <- spp_subsetter(bigvars_t2, "pl")
-ppdat <- spp_subsetter(bigvars_t2, "pp")
-
-cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF") ## keep species cols consistent
-
-ggplot(acdat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
-  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
-  stat_density_ridges(alpha=0) +
-  facet_grid(~comp_sp) +
+ggplot(alldata_t, aes(decade, pearson_r, color=pair)) +
+  stat_summary(aes(group=interaction(pair, hilo)), geom="pointrange") +
+  stat_summary(fun.y=mean, aes(group=interaction(pair, hilo), linetype=hilo), geom="line") +
   theme_test() +
-  ggtitle("A. concolor") +
-  scale_fill_manual(values=cols) +
-  theme(legend.position = 'none') +
-  xlab("Correlation") +
-  ylab("20 year block (year +/- 10)")
+  facet_grid(Region~hilo)
 
-ggplot(pjdat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
-  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
-  stat_density_ridges(alpha=0) +
-  facet_grid(~comp_sp) +
-  theme_test() +
-  ggtitle("P. jeffreyi") +
-  scale_fill_manual(values=cols) +
-  theme(legend.position = 'none') +
-  xlab("Correlation") +
-  ylab("20 year block (year +/- 10)")
-
-ggplot(pldat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
-  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
-  stat_density_ridges(alpha=0) +
-  facet_grid(~comp_sp) +
-  theme_test() +
-  ggtitle("P. lambertiana") +
-  scale_fill_manual(values=cols) +
-  theme(legend.position = 'none') +
-  xlab("Correlation") +
-  ylab("20 year block (year +/- 10)")
-
-ggplot(ppdat, aes(x=.value, y=as.factor(time), fill=comp_sp)) +
-  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
-  stat_density_ridges(alpha=0) +
-  facet_grid(~comp_sp) +
-  theme_test() +
-  ggtitle("P. ponderosa") +
-  scale_fill_manual(values=cols) +
-  theme(legend.position = 'none') +
-  xlab("Correlation") +
-  ylab("20 year block (year +/- 10)")
-
-```
-
-```{r climate_time}
-# ggplot(precip_summary, aes(timeseq, total_ppt_mm_sd, color=Site)) +
-#   geom_point() 
-# 
-# ggplot(precip_summary, aes(timeseq, total_ppt_mm_mean, color=Site)) +
-#   geom_point()
-
-ggplot(precip_summary, aes(total_ppt_mm_mean, total_ppt_mm_sd, color=timeseq)) +
+ggplot(precip_summary, aes(decade, total_ppt_mm_mean, color=Region)) +
   geom_point() +
-  theme_test() 
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
-# 
-# ggplot(precip_summary, aes(timeseq, mean_temp_C_sd, color=Site)) +
-#   geom_point()
-# 
-# ggplot(precip_summary, aes(timeseq, mean_temp_C_mean, color=Site)) +
-#   geom_point()
+ggplot(precip_summary, aes(decade, total_ppt_mm_sd, color=Region)) +
+  geom_point()  +
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
-ggplot(precip_summary, aes(mean_temp_C_mean, mean_temp_C_sd, color=timeseq)) +
-  geom_point()+
-  theme_test() 
+ggplot(precip_summary, aes(decade, spei12_mean, color=Region)) +
+  geom_point() +
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
-# ggplot(precip_summary, aes(timeseq, spei12_sd, color=Site)) +
-#   geom_point()
-# 
-# ggplot(precip_summary, aes(timeseq, spei12_mean, color=Site)) +
-#   geom_point()
+ggplot(precip_summary, aes(decade, spei12_sd, color=Region)) +
+  geom_point()  +
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
-ggplot(precip_summary, aes(spei12_mean, spei12_sd, color=timeseq)) +
-  geom_point()+
-  theme_test() 
+ggplot(precip_summary, aes(decade, mean_temp_C_mean, color=Region)) +
+  geom_point() +
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
-
-```
-
-
-
-```{r time_models}
-alldata <- bigvars_t2 %>% 
-  select(.value, tree1, tree2, spp1, spp2, pair, comp, Site, Neighborhood, time) %>% 
-  rename(corr=.value) %>% 
-  left_join(precip_summary, by=c("Site","Neighborhood", "time"="timeseq"))
-
-# mod <- brm(corr~time + (time|pair), data=alldata, cores=4)
+ggplot(precip_summary, aes(decade, mean_temp_C_sd, color=Region)) +
+  geom_point()  +
+  stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test()
 
 ```
+
+
+

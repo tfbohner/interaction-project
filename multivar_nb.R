@@ -28,26 +28,29 @@ count_na <- function(x) sum(is.na(x))
 
 grow_mat <- neigh1 %>% 
   pivot_wider(id_cols=c("Year", "spei12", "mean_temp_C", "total_ppt_mm"), names_from="tree.uniqueID", values_from="spline_growth", names_prefix="t") %>% 
-  # na.omit() %>% ## can include missing data if we want
+  na.omit() %>% ## can include missing data if we want
   mutate(nacount=apply(., 1, count_na)) %>% 
   filter(nacount<4) %>% 
-  select(-nacount) #%>% 
-  #mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
+  select(-nacount) %>%
+  mutate_at(.vars = vars(-Year, spei12, mean_temp_C, total_ppt_mm), .funs = scale)
 
 names(grow_mat) <- c("year", "spei12", "mean_temp_C","total_ppt_mm","a1", "a2", "a3", "a4", "b5", "b6", "b7", "b8", "c9", "c10", "c11", "c12")
 apply(grow_mat, 2, count_na)
 
+library(Hmisc)
+mat <- round(rcorr(as.matrix(grow_mat[,5:16]), type='pearson')$r,2)
+pr <- as.dist(round(cor(grow_mat[,5:13], method = 'pearson'),2))
+
 ## no predictors, corr mat is close to pearson
 fit.a <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 0, sigma~0), data=grow_mat, cores=4)
-fit.b <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), data=grow_mat, cores=4)
+fit.b <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 0), data=grow_mat, cores=4)
 fit.c <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), data=grow_mat, cores=4)
-fit.d <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), data=grow_mat, cores=4)
 
-fit.e <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1 +(1|year)), data=grow_mat, cores=4)
 
-fit4 <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 0), 
+fit4 <- brm(bf(mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) ~ 1), 
             family=student, 
-            prior = prior(gamma(2, .1), class = nu),
+            prior = c(prior(gamma(2, .1), class = nu),
+                      prior(lkj(1), class = rescor)),
             data=grow_mat, cores=4)
 
 # mvbind(a1, a2, a3, a4, b5, b6, b7, b8, c9, c10, c11, c12) is the section that I can't figure out how to turn into a variable
@@ -79,7 +82,7 @@ fit3 <- brm(bf1 + bf2 + bf3 + bf4 + bf5 + bf6 + bf7 + bf8 + bf9 + bf10 + bf11 + 
 
 
 ## Extract parameters from no predictor model
-vars <- fit.e %>% 
+vars <- fit.a %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
   median_qi() %>% 
   mutate(
@@ -88,6 +91,14 @@ vars <- fit.e %>%
     tree2=str_split_fixed(temp, "__", 2)[,2],
     pair=paste0(str_sub(tree1, 1,1), str_sub(tree2, 1,1))
   )
+
+pearson_vars <- reshape2::melt(as.matrix(pr)) %>% 
+  rename(tree1=Var1, tree2=Var2)
+
+test <- left_join(vars, pearson_vars, by=c("tree1", "tree2"))
+
+plot(test$.value, test$value)
+abline(0,1)
 
 vars4 <- fit4 %>% 
   gather_draws(`rescor.*`, regex=T) %>% 
