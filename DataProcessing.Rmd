@@ -232,10 +232,6 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   raw <- treeave
   raw$Year <- as.numeric(rownames(raw))
   
-  interseries.cor(temp, prewhiten = T)
-  corr.rwl.seg(temp,prewhiten = T)
-  rwi.stats.running(raw, prewhiten=T)
-  
   bai <- bai.out(raw, diam = NULL)
   bai$Year <- as.numeric(rownames(bai))
   rwi.stats(bai, prewhiten=T)
@@ -246,12 +242,11 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   nexp <- detrend(rwl = treeave, method="ModNegExp")
   nexp$Year <- as.numeric(rownames(nexp))
   
-  rwi.stats(nexp, prewhiten=T)
-  
   spl <- detrend(rwl = treeave, method="Spline")
+  id_df <- get(paste(i,"_id_df_tree", sep=""))
+  colnames(spl) <- id_df$label
+  write.rwl(spl, paste0("Processed Data/detrended rwl/", i, "_spl_rwl.rwl"))
   spl$Year <- as.numeric(rownames(spl))
-  
-  rwi.stats(spl, prewhiten=T)
   
   fss <- detrend(rwl = treeave, method="Friedman")
   fss_ar <- detrend(fss, method="Ar")
@@ -509,6 +504,7 @@ all_cordf3 <- all_cordf2 %>%
 
 
 write.csv(all_cordf2, "Processed Data/synchrony_decadal_pearson.csv", row.names = F)
+
 
 for(i in unique(rings_field$Region)){
   tree_sub <- filter(rings_field, Region==i) %>% 

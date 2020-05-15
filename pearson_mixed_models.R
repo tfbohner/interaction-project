@@ -3,52 +3,100 @@ library(brms)
 library(tidybayes)
 library(viridis)
 library(modelr)
+library(DescTools)
 
 ## Data----
-pearson <- read.csv("Processed Data/synchrony_dat.csv") %>% 
-  na.omit() %>% 
-  filter(Site.x !="ic") %>% 
-  mutate(pair=paste(Species.x, Species.y, sep="-"),
-         pair=ifelse(pair=="PJ-PP", "PP-PJ", ifelse(pair=="PL-PP", "PP-PL", pair)),
-         Species.x=ifelse(pair=="PP-PJ", "PP", as.character(Species.x)),
-         Species.y=ifelse(pair=="PP-PJ", "PJ", as.character(Species.y)),
-         comp=ifelse(Species.x==Species.y, "intra", "inter"))
-
 rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
   group_by(Site, Neighborhood, Species) %>% 
   mutate(comp_BA=BA_con+BA_het) %>%
   arrange(Site, Neighborhood, Species, ID)
+
+region <- rings_field %>% 
+  ungroup() %>% 
+  dplyr::select(c(Site, Region, hilo)) %>% 
+  group_by(Site) %>% 
+  summarize_all(first) %>% 
+  mutate(Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth")))
+
+ids <- ungroup(rings_field) %>% 
+  dplyr::select(c(Site, Neighborhood, tree.uniqueID)) %>% 
+  group_by(Site, Neighborhood, tree.uniqueID) %>%  summarize_all(first)
 
 tree_data <- rings_field %>% 
   group_by(tree.uniqueID) %>% 
   summarise(DBH=first(DBH),
             comp_BA=first(comp_BA))
 
-spp_diff <- read.csv("Processed Data/pred_spp_diff.csv") %>% 
-  mutate(spp_abs_diff = abs(spp_diff))
-site_grow <- read.csv("Processed Data/pred_site_grow.csv") %>% 
-  dplyr::select(-c(DBH, totBA))
+precip <- read.csv("Processed Data/precip_temp_spei.csv")
+
+decade <- seq(1910, 2020, by=10)
+
+precip_summary <- expand_grid(precip, decade) %>% 
+  filter(Year-decade>-29, Year<=decade) %>% 
+  group_by(Site, siteno, Neighborhood, hilo, decade) %>% 
+  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=function(x) mean(x, na.rm=T), sd=function(x) sd(x, na.rm=T))) %>% 
+  mutate_at(vars(total_ppt_mm_mean, mean_temp_C_mean, spei12_mean, 
+                 total_ppt_mm_sd, mean_temp_C_sd, spei12_sd), .funs = function(x) scale(x, scale = FALSE)) %>% 
+  left_join(region) %>% 
+  ungroup()
+
+spp_pairs <- expand_grid(Species.x=c("ac", "pj", "pl", "pp"), Species.y=c("ac", "pj", "pl", "pp")) %>% 
+  mutate(pair_first=str_c(Species.x, Species.y, sep="-"),
+         pair=c("ac-ac", "ac-pj", "ac-pl", "ac-pj", "ac-pj", "pj-pj", "pj-pl", "pj-pp", 
+                "ac-pl", "pj-pl", "pl-pl", "pl-pp", "ac-pp", "pj-pp", "pl-pp", "pp-pp")) %>% 
+  dplyr::select(-c(pair_first))
+
+pearson <- read.csv("Processed Data/synchrony_dat.csv") %>% 
+  na.omit() %>% 
+  filter(Site.x !="ic") %>% 
+  mutate_at(vars(Species.x, Species.y), tolower) %>% 
+  left_join(spp_pairs) %>% 
+  mutate(spp1=str_sub(pair, 1,2),
+         spp2=str_sub(pair, 4,5),
+         comp=ifelse(Species.x==Species.y, "intra", "inter"),
+         z=FisherZ(pearson_r))
+
+
+pearson_t <- read.csv("Processed Data/synchrony_decadal_pearson.csv") %>% 
+  na.omit() %>% 
+  filter(Site.x !="ic") %>% 
+  mutate_at(vars(Species.x, Species.y), tolower) %>% 
+  left_join(spp_pairs) %>% 
+  mutate(spp1=str_sub(pair, 1,2),
+         spp2=str_sub(pair, 4,5),
+         comp=ifelse(Species.x==Species.y, "intra", "inter"),
+         pearson_r=round(pearson_r, 4),
+         pearson_r=ifelse(pearson_r>=1, 0.9999, ifelse(pearson_r<=-1,-0.9999, pearson_r)),
+         z=FisherZ(pearson_r))
+
+hist(pearson_t$z)
+
+summary_t <- pearson_t %>% 
+  dplyr::select(c(pearson_r, z, decade, Site.x, Neighborhood.x, pair, comp)) %>% 
+  group_by(Site.x, Neighborhood.x, pair, comp, decade) %>% #
+  summarise(samp.depth=length(pearson_r),
+            pearson_sd=sd(pearson_r, na.rm=T),
+            pearson_r=mean(pearson_r, na.rm=T),
+            z_sd=sd(z, na.rm=T),
+            z_mean=mean(z, na.rm=T)) %>% 
+  left_join(precip_summary, by=c("Site.x"="Site", "Neighborhood.x"="Neighborhood", "decade")) #
 
 ## join all data ----
 alldata <- pearson %>% 
   left_join(tree_data, by=c("tree2"="tree.uniqueID")) %>% 
-  mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x)) %>% 
+  mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x),
+         Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth"))) %>% 
   mutate_at(vars(dist, sizeratio, comp_BA), scale)
 
+alldata_t <- pearson_t %>% 
+  left_join(tree_data, by=c("tree2"="tree.uniqueID")) %>% 
+  mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x),
+         Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth"))) %>% 
+  mutate_at(vars(dist, sizeratio, comp_BA), scale) %>% 
+  left_join(dplyr::select(precip_summary, -c(Region, hilo)), by=c('Site.x'='Site', "Neighborhood.x"="Neighborhood", 'decade'))
 
-## Visualize----
 
-ggplot(pearson, aes(dist, pearson_r)) +
-  geom_point() +
-  geom_smooth(method='lm', formula=y~poly(x, 2), se=FALSE) +
-  facet_grid(Site.x~Neighborhood.x)
-
-ggplot(pearson, aes(pearson_r, fill=comp)) +
-  geom_density(aes(y = ..scaled..), alpha=0.5) +
-  facet_grid(Species.x~Species.y) +
-  theme_test() +
-  geom_vline(xintercept=0, linetype="dashed")
-
+### Part 1: time invariant models----
 mod0 <- brm(pearson_r~ 1 + (1|Region:hilo), data=pearson, cores=4, control = list(adapt_delta=0.99))
 mod0b <- brm(pearson_r~ 1 + (1|Region/hilo), data=pearson, cores=4, control = list(adapt_delta=0.99))
 
@@ -77,9 +125,10 @@ mod10<- brm(pearson_r~dist + sizeratio + (1|pair/Region:hilo:Neighborhood.x) + (
 
 mod11<- brm(pearson_r~dist + sizeratio + (1|pair/Region:hilo) + (dist|Region:hilo) + (1|Region:hilo:Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
 
-mod12<- brm(pearson_r~dist + sizeratio + (1|pair/Region:hilo) + (1|Region:hilo/Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
+mod12<- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~dist + sizeratio + (1|pair/Region:hilo) + (1|Region:hilo/Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
+mod12z<- brm(z~dist + sizeratio + (1|pair/Region:hilo) + (1|Region:hilo/Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
 
-conditional_effects(mod12)
+conditional_effects(mod12z)
 
 for(i in 12) {
   mod <- paste0("mod",i)
@@ -91,203 +140,11 @@ loo_model_weights(list(l11, l12))
 
 saveRDS(mod11, "saved models/pearson models/mod11.rds")
 saveRDS(mod12, "saved models/pearson models/mod12.rds")
-
-## Manip----
-get_variables(mod11)
-
-## distance versus sizeratio?
-mod11 %>% 
-  gather_draws(b_dist, b_sizeratio) %>% 
-  median_qi() %>% 
-  ggplot(aes(y=.variable, x=.value)) +
-  geom_pointintervalh() +
-  geom_vline(xintercept=0, linetype="dashed")
-
-
-alldata %>%
-  data_grid(pearson_r, dist = rnorm(5, mean(alldata$dist), sd(alldata$dist)), 
-            sizeratio = 1) %>%
-  add_fitted_draws(mod11, allow_new_levels=TRUE) %>%
-  ggplot(aes(x = dist, y = .value)) +
-  stat_lineribbon(aes(y = .value), .width = c(.95), alpha=0.2) +
-  stat_lineribbon(aes(y = .value), .width = c(.01)) +
-  scale_fill_brewer(palette = "Greys") +
-  scale_color_viridis(discrete=TRUE) 
-
-
-mod11 %>% 
-  spread_draws(b_Intercept, r_pair[pair,]) %>% 
-  mutate(spp_mean=b_Intercept + r_pair) %>% 
-  median_qi() %>% 
-  ggplot(aes(y=pair, x=spp_mean, xmin=spp_mean.lower, xmax=spp_mean.upper)) +
-  geom_pointintervalh() +
-  geom_vline(xintercept=0, linetype="dashed")
-
-
-mod11 %>% 
-  spread_draws(r_pair[pair,]) %>% 
-  compare_levels(r_pair, by = pair) %>%
-  median_qi() %>%
-  mutate(pair1=str_sub(pair, 1,5),
-         pair1_spp1=str_sub(pair, 1,2),
-         pair1_spp2=str_sub(pair, 4,5),
-         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
-         pair2=str_sub(pair, 9,13),
-         pair2_spp1=str_sub(pair, 9,10),
-         pair2_spp2=str_sub(pair, 12,13),
-         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
-         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
-  filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
-  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
-         r_pair=ifelse(pair1_comp=="intra", r_pair, r_pair*-1),
-         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
-         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1)) %>% 
-  ggplot(aes(y = new_pair, x = r_pair)) +
-  geom_pointintervalh() +
-  geom_vline(xintercept=0, linetype="dashed")
-
-mod11 %>% 
-  spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[site,]) %>% 
-  mutate(spp_mean=b_Intercept + r_pair + `r_pair:Region:hilo`,
-         valid=str_detect(site, pair)) %>% 
-  filter(valid==1) %>% 
-  median_qi() %>% 
-  mutate(newsite=str_sub(site, start=7)) %>% 
-  ggplot(aes(y=pair, x=spp_mean, xmin=spp_mean.lower, xmax=spp_mean.upper, color=newsite)) +
-  geom_pointintervalh(position = position_dodgev(height=0.3)) +
-  geom_vline(xintercept=0, linetype="dashed") +
-  theme(legend.position = 'none')
-
-mod11 %>% 
-  spread_draws(r_pair[pair,], `r_pair:Region:hilo`[site,]) %>% 
-  mutate(spp_mean=r_pair + `r_pair:Region:hilo`,
-         valid=str_detect(site, pair)) %>% 
-  filter(valid==1) %>% 
-  mutate(newsite=str_sub(site, start=7)) %>% 
-  group_by(newsite) %>% 
-  compare_levels(spp_mean, by = pair) %>%
-  median_qi() %>%
-  mutate(pair1=str_sub(pair, 1,5),
-         pair1_spp1=str_sub(pair, 1,2),
-         pair1_spp2=str_sub(pair, 4,5),
-         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
-         pair2=str_sub(pair, 9,13),
-         pair2_spp1=str_sub(pair, 9,10),
-         pair2_spp2=str_sub(pair, 12,13),
-         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
-         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
-  filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
-  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
-         spp_mean=ifelse(pair1_comp=="intra", spp_mean, spp_mean*-1),
-         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
-         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1)) %>% 
-  ggplot(aes(y = new_pair, x = spp_mean, color=newsite)) +
-  geom_pointintervalh(position = position_dodgev(height=0.5)) +
-  geom_vline(xintercept=0, linetype="dashed")
-
-library(modelr)
-alldata %>%
-  data_grid(pair, dist=-1, sizeratio=0) %>%
-  add_predicted_draws(mod11, allow_new_levels=TRUE, re_formula = ~(1|pair)) %>%
-  median_qi() %>% 
-  ggplot(aes(x = .prediction, y = pair)) +
-  geom_pointintervalh()
-
-
-
-
+saveRDS(mod12z, "saved models/pearson models/mod12z.rds")
 
 
 ### Part 2: through time----
-## Data----
-
-pearson_t <- read.csv("Processed Data/synchrony_decadal_pearson.csv") %>% 
-  na.omit() %>% 
-  filter(Site.x !="ic") %>% 
-  mutate(pair=paste(Species.x, Species.y, sep="-"),
-         pair=ifelse(pair=="PJ-PP", "PP-PJ", ifelse(pair=="PL-PP", "PP-PL", pair)))
-
-precip <- read.csv("Processed Data/precip_temp_spei.csv")
-
-timeseq <- seq(1910, 2020, by=10)
-
-precip_summary <- expand_grid(precip, timeseq) %>% 
-  filter(Year-timeseq>-29, Year<=timeseq) %>% 
-  group_by(Site, siteno, Neighborhood, hilo, timeseq) %>% 
-  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=mean, sd=sd))
-
-
-## join all data ----
-alldata_t <- pearson_t %>% 
-  left_join(tree_data, by=c("tree2"="tree.uniqueID")) %>% 
-  mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x)) %>% 
-  mutate_at(vars(dist, sizeratio, comp_BA), scale) %>% 
-  left_join(precip_summary, by=c('Site.x'='Site', 'decade'='timeseq'))
-
-library(ggridges)
-
-ggplot(precip_summary, aes(timeseq, mean_temp_C_mean, group=interaction(Site, Neighborhood))) +
-  geom_line(aes(color=Site))
-
-ggplot(precip_summary, aes(timeseq, mean_temp_C_sd, group=interaction(Site, Neighborhood))) +
-  geom_line(aes(color=Site))
-
-ggplot(precip_summary, aes(timeseq, total_ppt_mm_mean, group=interaction(Site, Neighborhood))) +
-  geom_line(aes(color=Site))
-
-ggplot(precip_summary, aes(timeseq, total_ppt_mm_sd, group=interaction(Site, Neighborhood))) +
-  geom_line(aes(color=Site))
-
-ggplot(precip_summary, aes(timeseq, spei12_mean, group=interaction(Site, Neighborhood))) +
-  geom_line(aes(color=Site))
-
-ggplot(precip_summary, aes(timeseq, spei12_sd, group=interaction(Site, Neighborhood))) +
-  geom_line(aes(color=Site))
-
-ggplot(alldata_t, aes(x=pearson_r, y=as.factor(decade))) +
-  stat_density_ridges(quantile_lines = TRUE, quantiles = 2,  linetype="dashed") +
-  stat_density_ridges(alpha=0) +
-  facet_grid(~pair) +
-  theme_test() +
-  ggtitle("Pearson 30 year blocks, 10 year lag") +
-  scale_fill_manual(values=cols) +
-  theme(legend.position = 'none') +
-  xlab("Correlation") +
-  ylab("30 year block (year - 29)")
-
-summary <- alldata_t %>% 
-  group_by(pair, decade) %>% 
-  summarise(pearson_r=median(pearson_r))
-
-ggplot(summary, aes(decade, pearson_r, color=pair)) +
-  # geom_point() +
-  geom_line()
-
-summary <- alldata_t %>% 
-  group_by(Site.x, decade) %>% 
-  summarise(pearson_r=median(pearson_r))
-
-ggplot(summary, aes(decade, pearson_r, color=Site.x)) +
-  # geom_point() +
-  geom_line()
-
-summary <- alldata_t %>% 
-  group_by(pair, decade, Site.x) %>% 
-  summarise(pearson_r=median(pearson_r),
-            spei12_sd=median(spei12_sd, na.rm=T))
-
-ggplot(summary, aes(decade, pearson_r, group=interaction(pair,Site.x), color=pair)) +
-  # geom_point() +
-  geom_line() +
-  facet_wrap(~Site.x)
-
-
-ggplot(summary, aes(spei12_sd, pearson_r, color=Site.x)) +
-  geom_point() +
-  geom_smooth(method='lm') +
-  facet_wrap(~pair)
-
-
+## spline models----
 mod_s_t <- brm(bf(pearson_r ~ s(decade)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
 conditional_effects(mod_s_t)
 plot(conditional_effects(mod_s_t), points=TRUE)
@@ -296,6 +153,8 @@ mod_s_t2 <- brm(bf(pearson_r ~ s(decade) + (decade|pair)), data=alldata_t, cores
 conditional_effects(mod_s_t)
 
 mod_s_t3 <- brm(bf(pearson_r ~ pair + s(decade, by=pair)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
+mod_s_t4 <- brm(bf(pearson_r ~ pair + s(decade, by=Site.x)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
+conditional_effects(mod_s_t4)
 
 mod11_t<- brm(pearson_r~decade + (decade|pair/Region:hilo), 
               data=alldata_t, cores=4, control = list(adapt_delta=0.99))
@@ -303,6 +162,69 @@ mod11_t<- brm(pearson_r~dist + sizeratio + decade + (1|pair/Region:hilo) + (dist
               data=alldata_t, cores=4, control = list(adapt_delta=0.99))
 
 saveRDS(mod_s_t3, "saved models/spline.rds")
+saveRDS(mod_s_t4, "saved models/spline_site.rds")
 
 
-clim1 <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x:pair), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
+## climate models----
+clim0 <- brm(pearson_r~total_ppt_mm_mean + total_ppt_mm_sd + mean_temp_C_mean + mean_temp_C_sd, data=summary_t, cores=4, control = list(adapt_delta=0.99))
+## high predictor correlations
+vcov(clim0, correlation = T) %>% 
+  round(digits = 3)
+
+clim1 <- brm(pearson_r~spei12_mean + (1|Site.x + pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1b <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x + pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1c <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1d <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1e <- brm(pearson_r|se(pearson_sd, sigma=TRUE)~spei12_mean + (spei12_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+
+clim2<- update(clim1, formula=~. -spei12_mean +spei12_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim3<- update(clim1, formula=~. -spei12_mean +total_ppt_mm_mean, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim4<- update(clim1, formula=~. -spei12_mean +total_ppt_mm_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim5<- update(clim1, formula=~. -spei12_mean +mean_temp_C_mean, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim6<- update(clim1, formula=~. -spei12_mean +mean_temp_C_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim7<- update(clim1, formula=~. +spei12_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+vcov(clim7, correlation = T) %>% 
+  round(digits = 3)
+
+for(i in 1:7) {
+  mod <- paste0("clim",i)
+  l <- loo(get(mod))
+  assign(paste0("l", i), l)
+}
+
+loo_model_weights(list(l1, l2, l7))
+
+conditional_effects(clim7)
+
+clim7a<- update(clim1, formula=~. +spei12_sd + (1|Site.x:pair), newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
+l7a <- loo(clim7a)
+
+loo_model_weights(list(l7, l7a))
+
+clim7b <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Site.x*pair), 
+              data=summary_t, cores=4, control = list(adapt_delta=0.99))
+l7b <- loo(clim7b)
+
+clim7c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Site.x) + (1|pair/Site.x), 
+              data=summary_t, cores=4, control = list(adapt_delta=0.99))
+
+l7c <- loo(clim7c)
+
+loo_model_weights(list(l7b, l7c), method='pseudobma')
+
+clim7bz <- brm(z_mean~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Site.x*pair), 
+              data=summary_t, cores=4, control = list(adapt_delta=0.99))
+
+pp_check(clim7b)
+
+l7b <- loo(clim7b)
+
+loo_model_weights(list(l7, l7a, l7b))
+
+saveRDS(clim7b, "saved models/pearson models/clim7b.rds")
+saveRDS(clim7c, "saved models/pearson models/clim7c.rds")
+
+clim8c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Region/hilo) + (1|pair/Region/hilo), 
+              data=summary_t, cores=4, control = list(adapt_delta=0.99))
+
+saveRDS(clim8c, "saved models/pearson models/clim8c.rds")
