@@ -484,11 +484,23 @@ ggplot(me$`decade:Site.x`, aes(decade, estimate__)) +
 spline_mod <- readRDS("saved models/spline.rds")
 ## should go with changes through time model
 time_summ <- expand_grid(Site.x=unique(droplevels(summary_t$Site.x)), pair=c('AC-AC', 'PJ-AC', 'PJ-PJ', 'PL-AC', 'PL-PJ', 'PL-PL', 'PP-AC', 'PP-PJ', 'PP-PL', 'PP-PP'), decade=unique(summary_t$decade)) %>%
-  add_fitted_draws(spline_mod, re_formula = NULL, allow_new_levels=TRUE) %>%
-  compare_levels(.value, by=pair) %>% 
-  median_qi(.width=c(0.5, 0.95))
+  add_fitted_draws(spline_mod, re_formula = NULL, allow_new_levels=TRUE)
 
-time_summ2 <- time_summ %>% 
+time_summ_sp <- time_summ %>% 
+  median_qi(.width=c(0.5, 0.95)) %>% 
+  mutate(
+    spp1=str_sub(pair, 1,2),
+    spp2=str_sub(pair, 4,5),
+    comp=ifelse(spp1==spp2, "intra", "inter"),
+    timechunk=ifelse(decade<1970, "early", "late")) %>% 
+  group_by(Site.x, pair, spp1, comp, timechunk, .width) %>% 
+  summarise_all(mean)
+
+time_summ1 <- time_summ %>% 
+  compare_levels(.value, by=pair) %>% 
+  median_qi(.width=c(0.5, 0.95)) 
+
+time_summ2 <- time_summ1 %>% 
   mutate(pair1=str_sub(pair, 1,5),
          pair1_spp1=str_sub(pair, 1,2),
          pair1_spp2=str_sub(pair, 4,5),
@@ -507,6 +519,20 @@ time_summ2 <- time_summ %>%
   dplyr::select(c(Site.x, new_pair, .value, .upper, .lower, .width, timechunk)) %>% 
   group_by(Site.x, new_pair, timechunk, .width) %>% 
   summarise_all(mean)
+
+ggplot(filter(time_summ_sp, comp=="intra"), aes(x=.value, y=spp1, color=timechunk)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
+  geom_vline(xintercept = 0, linetype="dashed")  +
+  xlab("expected intraspecific synchrony")+ ylab("Species") + 
+  labs(caption="Fig. Changes in intraspecific synchrony pre and post 1970.") +
+  theme(plot.caption = element_text(hjust = 0))
+
+ggplot(filter(time_summ_sp, comp=="inter"), aes(x=.value, y=pair, color=timechunk)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
+  geom_vline(xintercept = 0, linetype="dashed")  +
+  xlab("expected intraspecific synchrony")+ ylab("Species") + 
+  labs(caption="Fig. Changes in interspecific synchrony pre and post 1970.") +
+  theme(plot.caption = element_text(hjust = 0))
 
 ggplot(time_summ2, aes(x=.value, y=new_pair, color=timechunk)) +
   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
