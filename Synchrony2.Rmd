@@ -285,7 +285,7 @@ mod12 %>%
   geom_pointintervalh() +
   geom_vline(xintercept=0, linetype="dashed") +
   theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate") +
-  labs(caption="Fig. Contrast in intra versus interspecific synchrony effect. Positive contrasts indicate that intraspecific synchrony is greater than interspecific. White fir and sugar pine show synchrony differentiation but not the yellow pines") +
+  labs(caption="Fig. Contrast in intra versus interspecific synchrony effect. Positive contrasts indicate that intraspecific \n synchrony is greater than interspecific. White fir and sugar pine show synchrony differentiation but not  \nthe yellow pines") +
   theme(plot.caption = element_text(hjust = 0))
 
 mod12 %>% 
@@ -329,7 +329,7 @@ mod12 %>%
   geom_pointintervalh(position = position_dodgev(height=0.5)) +
   geom_vline(xintercept=0, linetype="dashed") +
   theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate") +
-  labs(caption="Fig. Contrast in intra versus interspecific synchrony effect including region and elevation variation. Positive contrasts indicate that intraspecific synchrony is greater than interspecific. Species level patterns in differentiation predominate although there is noteworthy variation among sites.") +
+  labs(caption="Fig. Contrast in intra versus interspecific synchrony effect including region and elevation variation. Positive \n contrasts indicate thatintraspecific synchrony is greater than interspecific. Species level patterns in differentiation \n predominate although there is noteworthy variation among sites.") +
   theme(plot.caption = element_text(hjust = 0))
 
 ```
@@ -337,7 +337,7 @@ mod12 %>%
 
 ## Q3 Synchrony through time
 ### Pairwise pearson correlations through time:
-We calculated pearson correlations between pairs of individuals within neighborhoods for 30 year time blocks with a 10 year lag to measure synchrony through time. Trends were analyzed for data summarized for species-pairs at the neighborhood level. 
+We calculated pearson correlations between pairs of individuals within neighborhoods for 30 year time blocks with a 10 year lag to measure synchrony through time. Trends were analyzed for data summarized for species-pairs at the neighborhood level. Note this is measuring within population synchrony (in contrast to Shestakova spatial synchrony).
 
 
 ```{r exploratory}
@@ -481,6 +481,42 @@ ggplot(me$`decade:Site.x`, aes(decade, estimate__)) +
   labs(caption="Fig. Fluctuations are variable at the site level, there is a particularly steep increase for black mountain (San Jacinto).") +
   theme(plot.caption = element_text(hjust = 0))
 
+spline_mod <- readRDS("saved models/spline.rds")
+## should go with changes through time model
+time_summ <- expand_grid(Site.x=unique(droplevels(summary_t$Site.x)), pair=c('AC-AC', 'PJ-AC', 'PJ-PJ', 'PL-AC', 'PL-PJ', 'PL-PL', 'PP-AC', 'PP-PJ', 'PP-PL', 'PP-PP'), decade=unique(summary_t$decade)) %>%
+  add_fitted_draws(spline_mod, re_formula = NULL, allow_new_levels=TRUE) %>%
+  compare_levels(.value, by=pair) %>% 
+  median_qi(.width=c(0.5, 0.95))
+
+time_summ2 <- time_summ %>% 
+  mutate(pair1=str_sub(pair, 1,5),
+         pair1_spp1=str_sub(pair, 1,2),
+         pair1_spp2=str_sub(pair, 4,5),
+         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
+         pair2=str_sub(pair, 9,13),
+         pair2_spp1=str_sub(pair, 9,10),
+         pair2_spp2=str_sub(pair, 12,13),
+         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
+         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
+  filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
+  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         .value=ifelse(pair1_comp=="intra", .value, .value*-1),
+         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
+         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1),
+         timechunk=ifelse(decade<1970, "early", "late")) %>% 
+  dplyr::select(c(Site.x, new_pair, .value, .upper, .lower, .width, timechunk)) %>% 
+  group_by(Site.x, new_pair, timechunk, .width) %>% 
+  summarise_all(mean)
+
+ggplot(time_summ2, aes(x=.value, y=new_pair, color=timechunk)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
+  geom_vline(xintercept = 0, linetype="dashed")  +
+  xlab("expected correlation")+ ylab("Species contrast") + 
+  labs(caption="Fig. Changes in synchrony differences between intra and interspecific pairing. Post 1970 \n white fir intraspecific synchrony has become stronger than interspecific synchrony.") +
+  theme(plot.caption = element_text(hjust = 0))
+
+
+
 ```
 
 ### Climate response model:
@@ -488,7 +524,7 @@ Model selection supported SPEI as the best predictor for synchrony.  I included 
 
 ```{r env_model}
 clim_mod <- readRDS("saved models/pearson models/clim8c.rds")
-print(spline_mod$formula)
+print(clim_mod$formula)
   
 clim_summ <- expand_grid(Region=unique(summary_t$Region), hilo=unique(summary_t$hilo), spei12_mean=quantile(summary_t$spei12_mean, probs=c(.025, .25, .5, .75, .975)), spei12_sd=quantile(summary_t$spei12_sd, probs=c(.5))) %>% 
   mutate(Site=paste0(Region,hilo)) %>% 
@@ -500,7 +536,7 @@ ggplot(clim_summ, aes(spei12_mean, .value)) +
   geom_ribbon(aes(ymin=.lower, ymax=.upper, fill=Region, group=interaction(Region, hilo)), alpha=0.2) +
   geom_line(aes(color=Region , group=interaction(Region, hilo))) + theme_test() +
   ylab("expected correlation") + 
-  labs(caption="Fig. Regional relationship between SPEI mean and expected synchrony. In the lowest latitudes synchrony is highest in dry periods while in the most mesic site synchrony is higher in the wet periods.") +
+  labs(caption="Fig. Regional relationship between SPEI mean and expected synchrony. In the lowest latitudes synchrony is highest in \n dry periods while in the most mesic site synchrony is higher in the wet periods.") +
   theme(plot.caption = element_text(hjust = 0))
 
 clim_summ <- expand_grid(Region=unique(summary_t$Region), hilo=unique(summary_t$hilo), spei12_mean=quantile(summary_t$spei12_mean, probs=c( .5)), spei12_sd=quantile(summary_t$spei12_sd, probs=c(.025, .25, .5, .75, .975))) %>% 
@@ -513,7 +549,7 @@ ggplot(clim_summ, aes(spei12_sd, .value)) +
   geom_ribbon(aes(ymin=.lower, ymax=.upper, fill=Region, group=interaction(Region, hilo)), alpha=0.2) +
   geom_line(aes(color=Region , group=interaction(Region, hilo))) + theme_test() +
   ylab("expected correlation") + 
-  labs(caption="Fig. Regional relationship between SPEI SD and expected synchrony. In the lowest latitudes synchrony is highest in variable periods while in the most mesic site synchrony is higher in the more variable periods") +
+  labs(caption="Fig. Regional relationship between SPEI SD and expected synchrony. In the lowest latitudes synchrony is highest in \n variable periods while in the most mesic site synchrony is higher in the more variable periods") +
   theme(plot.caption = element_text(hjust = 0))
 
 clim_summ <- expand_grid(pair=unique(summary_t$pair), spei12_mean=quantile(summary_t$spei12_mean, probs=c(.025, .25, .5, .75, .975)), spei12_sd=quantile(summary_t$spei12_sd, probs=c(.5))) %>% 
@@ -565,22 +601,42 @@ ggplot(clim_summ, aes(spei12_sd, .value)) +
   theme(plot.caption = element_text(hjust = 0))
 
 
-# clim_summ <- expand_grid(Region=unique(summary_t$Region), hilo=unique(summary_t$hilo), pair=unique(summary_t$pair), spei12_mean=quantile(summary_t$spei12_mean, probs=c( .5)), spei12_sd=quantile(summary_t$spei12_sd, probs=c(.5))) %>% 
-#   mutate(Site=paste0(Region,hilo)) %>% 
-#   filter(Site!="Mammothlow") %>% 
-#   add_fitted_draws(clim_mod, re_formula = NULL, allow_new_levels=TRUE) %>% 
-#   median_qi(.width=c(0.5, 0.95))
-# 
-# ggplot(clim_summ, aes(x=.value, y=pair, color=Region, group=interaction(Region, hilo))) +
-#   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() + 
-#   geom_vline(xintercept = 0, linetype="dashed")  +
-#   xlab("expected correlation") 
-# 
-# ggplot(clim_summ, aes(x=.value, y=interaction(hilo, Region), color=pair)) +
-#   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
-#   geom_vline(xintercept = 0, linetype="dashed")  +
-#   xlab("expected correlation") 
 
+```
+
+```{r misc}
+
+## should go with changes through time model
+clim_summ <- expand_grid(Region=unique(summary_t$Region), hilo=unique(summary_t$hilo), pair=unique(summary_t$pair), spei12_mean=quantile(summary_t$spei12_mean, probs=c( .5)), spei12_sd=quantile(summary_t$spei12_sd, probs=c(.5))) %>%
+  mutate(Site=paste0(Region,hilo)) %>%
+  filter(Site!="Mammothlow") %>%
+  add_fitted_draws(clim_mod, re_formula = NULL, allow_new_levels=TRUE) %>%
+  compare_levels(.value, by=pair) %>% 
+  median_qi(.width=c(0.5, 0.95)) %>% 
+  mutate(pair1=str_sub(pair, 1,5),
+         pair1_spp1=str_sub(pair, 1,2),
+         pair1_spp2=str_sub(pair, 4,5),
+         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
+         pair2=str_sub(pair, 9,13),
+         pair2_spp1=str_sub(pair, 9,10),
+         pair2_spp2=str_sub(pair, 12,13),
+         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
+         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
+  filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
+  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         .value=ifelse(pair1_comp=="intra", .value, .value*-1),
+         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
+         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1))
+
+ggplot(clim_summ, aes(x=.value, y=new_pair, color=Region, group=interaction(Region, hilo))) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
+  geom_vline(xintercept = 0, linetype="dashed")  +
+  xlab("expected correlation")
+
+ggplot(clim_summ, aes(x=.value, y=interaction(hilo, Region), color=new_pair)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
+  geom_vline(xintercept = 0, linetype="dashed")  +
+  xlab("expected correlation")
 ```
 
 

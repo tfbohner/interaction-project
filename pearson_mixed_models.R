@@ -228,3 +228,8 @@ clim8c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (sp
               data=summary_t, cores=4, control = list(adapt_delta=0.99))
 
 saveRDS(clim8c, "saved models/pearson models/clim8c.rds")
+
+clim9c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|comp/Region/hilo), 
+              data=summary_t, cores=4, control = list(adapt_delta=0.99))
+
+saveRDS(clim9c, "saved models/pearson models/clim9c.rds")
