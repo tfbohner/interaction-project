@@ -55,6 +55,8 @@ sites <- dplyr::select(sitechar, Site2, siteno, Region, hilo) %>%
   group_by(Site2) %>% 
   summarise_all(first)
 
+write.csv(sites, "Processed Data/site_ref.csv", row.names = F)
+
 sites2 <- dplyr::select(sitechar, Site, Site2, siteno, Region, hilo) %>% 
   group_by(Site2) %>% 
   summarise_all(first)

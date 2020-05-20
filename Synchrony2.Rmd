@@ -49,6 +49,8 @@ Prediction: synchrony has increased with time, increased synchrony associated wi
 
 Synchrony is explored here through residual correlations betweeen trees from multivariate models of tree growth.
 ```{r data}
+treeclim <- read.csv("Processed Data/treeclim_spp.csv")
+
 rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>% 
   group_by(Site, Neighborhood, Species) %>% 
   mutate(comp_BA=BA_con+BA_het) %>%
@@ -119,6 +121,8 @@ summary_t <- pearson_t %>%
 alldata <- pearson %>% 
   left_join(tree_data, by=c("tree2"="tree.uniqueID")) %>% 
   mutate(sizeratio=ifelse(DBH.x>DBH.y, DBH.x/DBH.y, DBH.y/DBH.x),
+         realsizeratio=sizeratio,
+         realdist=dist,
          Region=factor(Region, levels=c("San Jac", "SENF", "SEKI", "Mammoth"))) %>% 
   mutate_at(vars(dist, sizeratio, comp_BA), scale)
 
@@ -180,9 +184,9 @@ ggplot(alldata, aes(pearson_r, fill=comp)) +
   geom_vline(data=summary, aes(xintercept=med), linetype="dashed") +
   ylab("proportion") + xlab("pearson correlation")
 
-# show_col(viridis_pal()(5)) # get the hex codes for the colors
+show_col(viridis_pal()(5)) # get the hex codes for the colors
 #440154FF
-cols <- c("self"="#440154FF", "pj"="#3B528BFF", "pl"="#21908CFF", "pp"="#5DC863FF", "ac"="#FDE725FF") ## keep species cols consistent
+cols <- c("self"="#440154FF", "ac"="#3B528BFF", "pj"="#21908CFF", "pl"="#5DC863FF", "pp"="#FDE725FF") ## keep species cols consistent
 
 p1 <- ggplot(acdat, aes(pearson_r, color=comp_sp, fill=comp_sp)) +
   geom_density(position = "identity", alpha=0.5) +
@@ -241,15 +245,61 @@ We wanted to test the relationship between the pairwise correlations and distanc
 mod12 <- readRDS("saved models/pearson models/mod12.rds")
 print(mod12$formula)
 
-mod12 %>% 
+# dist_summ <- dplyr::select(alldata, c(dist, realdist, sizeratio)) %>%
+#   mutate(sizeratio=quantile(sizeratio, probs=0.5)) %>%
+#   add_fitted_draws(model=mod12, re_formula=NA) %>%
+#   median_qi()
+# 
+# ggplot(dist_summ, aes(realdist, .value)) +
+#   geom_point(data=alldata, aes(realdist, pearson_r))+
+#   geom_line() +
+#   geom_ribbon(aes(ymin=.lower, ymax=.upper), alpha=0.3)
+# 
+# size_summ <- dplyr::select(alldata, c(dist, sizeratio, realsizeratio)) %>%
+#   mutate(dist=quantile(dist, probs=0.5)) %>%
+#   add_fitted_draws(model=mod12, re_formula=NA) %>%
+#   median_qi()
+# 
+# ggplot(size_summ, aes(realsizeratio, .value)) +
+#   geom_point(data=alldata, aes(realsizeratio, pearson_r))+
+#   geom_line() +
+#   geom_ribbon(aes(ymin=.lower, ymax=.upper), alpha=0.3)
+# 
+sizes <- data.frame(sizeratio=quantile(alldata$sizeratio, probs=c(0.025,0.5,0.975)),
+                    realsizeratio=round(quantile(alldata$realsizeratio, probs=c(0.025,0.5,0.975)), digits = 2))
+
+dist_summ <- dplyr::select(alldata, c(dist, realdist)) %>%
+  expand_grid(sizeratio=quantile(alldata$sizeratio, probs=c(0.025,0.5,0.975))) %>%
+  add_fitted_draws(model=mod12, re_formula=NA) %>%
+  median_qi() %>%
+  left_join(sizes)
+
+d1 <- ggplot() +
+  geom_point(data=alldata, aes(realdist, pearson_r, color=realsizeratio))+
+  scale_color_viridis(option='magma', direction = -1) +
+  geom_line(data=dist_summ, aes(realdist, .value, group=as.factor(realsizeratio), color=realsizeratio)) +
+  geom_ribbon(data=dist_summ, aes(realdist, ymin=.lower, ymax=.upper, 
+                             group=as.factor(realsizeratio)), alpha=0.1) +
+  theme_test() +
+  xlab("distance (m)") + ylab("estimated correlation") +
+  ggtitle("") +
+  labs(color = "size ratio") +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+  
+
+d2 <- mod12 %>% 
   gather_draws(b_dist, b_sizeratio) %>% 
   median_qi(.width = c(.50, .95)) %>% 
   ggplot(aes(y=.variable, x=.value)) +
   geom_pointintervalh() +
   geom_vline(xintercept=0, linetype="dashed") +
   theme_test() + ylab("") + xlab("parameter estimate") +
-  labs(caption="Fig. Increasing distance and larger differences between tree sizes correspond with lower synchrony values") +
-  theme(plot.caption = element_text(hjust = 0))
+  ggtitle("") +
+  theme(plot.caption = element_text(hjust = 0)) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  scale_y_discrete(position = "right")
+
+plot_grid(d1, d2, align='vh', axis='btlr', labels='auto', ncol=2)
 
 mod12 %>% 
   spread_draws(b_Intercept, r_pair[pair,]) %>% 
@@ -263,7 +313,7 @@ mod12 %>%
   theme(plot.caption = element_text(hjust = 0))
 
 
-mod12 %>% 
+contrasts <- mod12 %>% 
   spread_draws(r_pair[pair,]) %>% 
   compare_levels(r_pair, by = pair) %>%
   median_qi(.width = c(.50, .95)) %>% 
@@ -278,15 +328,84 @@ mod12 %>%
          valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
   filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
   mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         new_inter1=str_sub(new_pair, start=9,10),
+         new_inter2=str_sub(new_pair, start=12,13),
+         intra_spp=str_sub(new_pair, start=1, 2),
+         comp_spp=ifelse(str_detect(new_inter1, intra_spp), new_inter2, new_inter1),
          r_pair=ifelse(pair1_comp=="intra", r_pair, r_pair*-1),
          .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
-         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1)) %>% 
-  ggplot(aes(y = new_pair, x = r_pair)) +
+         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1))
+
+
+i1 <- ggplot(data=filter(contrasts, intra_spp=="ac"),
+       aes(y = new_pair, x = r_pair, color=comp_spp)) +
   geom_pointintervalh() +
   geom_vline(xintercept=0, linetype="dashed") +
+  scale_color_manual(values=cols) +
   theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate") +
-  labs(caption="Fig. Contrast in intra versus interspecific synchrony effect. Positive contrasts indicate that intraspecific \n synchrony is greater than interspecific. White fir and sugar pine show synchrony differentiation but not  \nthe yellow pines") +
-  theme(plot.caption = element_text(hjust = 0))
+  theme(legend.position = 'none') +
+  theme(axis.title=element_blank()) +
+  ggtitle("") +
+  theme(axis.text.y=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+
+i2 <- ggplot(data=filter(contrasts, intra_spp=="pj"),
+       aes(y = new_pair, x = r_pair, color=comp_spp)) +
+  geom_pointintervalh() +
+  geom_vline(xintercept=0, linetype="dashed") +
+  scale_color_manual(values=cols) +
+  theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate")+
+  theme(legend.position = 'none') +
+  theme(axis.title=element_blank()) +
+  ggtitle("") +
+  theme(axis.text.y=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+
+i3 <- ggplot(data=filter(contrasts, intra_spp=="pl"),
+       aes(y = new_pair, x = r_pair, color=comp_spp)) +
+  geom_pointintervalh() +
+  geom_vline(xintercept=0, linetype="dashed") +
+  scale_color_manual(values=cols) +
+  theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate")+
+  theme(legend.position = 'none') +
+  theme(axis.title=element_blank()) +
+  ggtitle("") +
+  theme(axis.text.y=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+
+i4 <- ggplot(data=filter(contrasts, intra_spp=="pp"),
+       aes(y = new_pair, x = r_pair, color=comp_spp)) +
+  geom_pointintervalh() +
+  geom_vline(xintercept=0, linetype="dashed") +
+  scale_color_manual(values=cols) +
+  theme_test() + ylab("Species pair comparisons") + xlab("modeled synchrony contrast estimate")+
+  theme(legend.position = 'none') +
+  theme(axis.title.y=element_blank()) +
+  ggtitle("") +
+  theme(axis.text.y=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+
+p1a <- p1 +
+  ggtitle("") +
+  theme(axis.title=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+p2a <- p2 +
+  ggtitle("") +
+  theme(axis.title=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+p3a <- p3 +
+  ggtitle("") +
+  theme(axis.title=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+p4a <- p4 +
+  ggtitle("") +
+  theme(axis.title.y=element_blank()) +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+
+plot_grid(
+  plot_grid(p1a, i1, p2a, i2, p3a, i3, p4a, i4, ncol=2, align='vh', labels='auto'),
+  legend, ncol=2, rel_widths = c(1,0.15))
+
 
 mod12 %>% 
   spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[site,]) %>% 
@@ -301,6 +420,7 @@ mod12 %>%
   theme_test() + ylab("") + xlab("Synchrony effect estimate") +
   labs(caption="Fig. Variation in effect of species pairing on synchrony including region and elevation variation") +
   theme(plot.caption = element_text(hjust = 0))
+
 
 mod12 %>% 
   spread_draws(r_pair[pair,], `r_pair:Region:hilo`[site,]) %>% 
@@ -344,6 +464,13 @@ We calculated pearson correlations between pairs of individuals within neighborh
 ggplot(alldata_t, aes(decade, pearson_r, color=Region)) +
   stat_summary(aes(group=interaction(Region, hilo)), geom="pointrange") +
   stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
+  theme_test() +
+  labs(caption="Fig. Growth synchrony through time.") +
+  theme(plot.caption = element_text(hjust = 0))
+
+ggplot(alldata_t, aes(decade, pearson_r, color=pair)) +
+  stat_summary(aes(group=pair), geom="pointrange") +
+  stat_summary(fun.y=mean, aes(group=pair), geom="line") +
   theme_test() +
   labs(caption="Fig. Growth synchrony through time.") +
   theme(plot.caption = element_text(hjust = 0))
@@ -465,7 +592,8 @@ plot_grid(
 ### Spline model:
 I wanted to explore fitting a spline model to look at nonlinear changes in synchrony over time for different species-pairs and at different sites.
 ```{r spline_model}
-spline_mod <- readRDS("saved models/spline_site.rds")
+# spline_mod <- readRDS("saved models/spline_site.rds")
+spline_mod <- readRDS("saved models/spline.rds")
 print(spline_mod$formula)
 me <- marginal_effects(spline_mod)
 
@@ -475,26 +603,46 @@ ggplot(me$decade, aes(decade, estimate__)) +
   labs(caption="Fig. Overall synchrony has increased through time.") +
   theme(plot.caption = element_text(hjust = 0))
 
-ggplot(me$`decade:Site.x`, aes(decade, estimate__)) +
-  geom_ribbon(aes(ymin=lower__, ymax=upper__, fill=Site.x), alpha=0.3) +
-  geom_line(aes(color=Site.x)) + theme_test() + ylab("expected correlation") + 
+s1 <- ggplot(alldata_t, aes(decade, pearson_r)) +
+  geom_ribbon(data=me$decade, aes(ymin=lower__, ymax=upper__), alpha=0.3) +
+  geom_line(data=me$decade, aes(decade, estimate__)) +
+  # geom_ribbon(data=me$`decade:pair`, aes(ymin=lower__, ymax=upper__, fill=tolower(pair)), alpha=0.3) +
+  # geom_line(data=me$`decade:pair`, aes(decade, estimate__, color=tolower(pair))) +
+  stat_summary(aes(group=pair, color=pair), geom="pointrange") +
+  stat_summary(fun.y=mean, aes(group=pair, color=pair), geom="line") +
+  theme_test() +
+  ylab("correlation") +
+  scale_color_viridis(discrete=T, name='') +
+  theme(legend.position = 'bottom') +
+  ggtitle("") +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+
+ggplot(me$`decade:pair`, aes(decade, estimate__)) +
+  geom_ribbon(aes(ymin=lower__, ymax=upper__, fill=pair), alpha=0.3) +
+  geom_line(aes(color=pair)) +  ylab("expected correlation") +
   labs(caption="Fig. Fluctuations are variable at the site level, there is a particularly steep increase for black mountain (San Jacinto).") +
   theme(plot.caption = element_text(hjust = 0))
 
+# ggplot(me$`decade:Site.x`, aes(decade, estimate__)) +
+#   geom_ribbon(aes(ymin=lower__, ymax=upper__, fill=Site.x), alpha=0.3) +
+#   geom_line(aes(color=Site.x)) + theme_test() + ylab("expected correlation") +
+#   labs(caption="Fig. Fluctuations are variable at the site level, there is a particularly steep increase for black mountain (San Jacinto).") +
+#   theme(plot.caption = element_text(hjust = 0))
+
 spline_mod <- readRDS("saved models/spline.rds")
 ## should go with changes through time model
-time_summ <- expand_grid(Site.x=unique(droplevels(summary_t$Site.x)), pair=c('AC-AC', 'PJ-AC', 'PJ-PJ', 'PL-AC', 'PL-PJ', 'PL-PL', 'PP-AC', 'PP-PJ', 'PP-PL', 'PP-PP'), decade=unique(summary_t$decade)) %>%
+time_summ <- expand_grid(pair=c('AC-AC', 'PJ-AC', 'PJ-PJ', 'PL-AC', 'PL-PJ', 'PL-PL', 'PP-AC', 'PP-PJ', 'PP-PL', 'PP-PP'), decade=unique(summary_t$decade)) %>%
   add_fitted_draws(spline_mod, re_formula = NULL, allow_new_levels=TRUE)
 
 time_summ_sp <- time_summ %>% 
-  median_qi(.width=c(0.5, 0.95)) %>% 
-  mutate(
-    spp1=str_sub(pair, 1,2),
+  mutate(spp1=str_sub(pair, 1,2),
     spp2=str_sub(pair, 4,5),
     comp=ifelse(spp1==spp2, "intra", "inter"),
     timechunk=ifelse(decade<1970, "early", "late")) %>% 
-  group_by(Site.x, pair, spp1, comp, timechunk, .width) %>% 
-  summarise_all(mean)
+  ungroup() %>% 
+  dplyr::select(-decade) %>% 
+  group_by(pair, spp1, spp2, comp, timechunk) %>% 
+  median_qi(.width=c(0.5, 0.95))
 
 time_summ1 <- time_summ %>% 
   compare_levels(.value, by=pair) %>% 
@@ -512,12 +660,17 @@ time_summ2 <- time_summ1 %>%
          valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
   filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
   mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         new_inter1=str_sub(new_pair, start=9,10),
+         new_inter2=str_sub(new_pair, start=12,13),
+         intra_spp=str_sub(new_pair, start=1, 2),
+         comp_spp=ifelse(str_detect(new_inter1, intra_spp), new_inter2, new_inter1),
          .value=ifelse(pair1_comp=="intra", .value, .value*-1),
          .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
          .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1),
          timechunk=ifelse(decade<1970, "early", "late")) %>% 
-  dplyr::select(c(Site.x, new_pair, .value, .upper, .lower, .width, timechunk)) %>% 
-  group_by(Site.x, new_pair, timechunk, .width) %>% 
+  ungroup() %>% 
+  dplyr::select(c(new_pair, intra_spp, comp_spp, .value, .upper, .lower, .width, timechunk)) %>% 
+  group_by(new_pair, intra_spp, comp_spp, timechunk, .width) %>% 
   summarise_all(mean)
 
 ggplot(filter(time_summ_sp, comp=="intra"), aes(x=.value, y=spp1, color=timechunk)) +
@@ -541,8 +694,14 @@ ggplot(time_summ2, aes(x=.value, y=new_pair, color=timechunk)) +
   labs(caption="Fig. Changes in synchrony differences between intra and interspecific pairing. Post 1970 \n white fir intraspecific synchrony has become stronger than interspecific synchrony.") +
   theme(plot.caption = element_text(hjust = 0))
 
-
-
+s2 <-ggplot(time_summ_sp, aes(x=.value, y=pair, color=timechunk)) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
+  geom_vline(xintercept = 0, linetype="dashed")  +
+  xlab("expected correlation") + ylab("") +
+  scale_color_viridis(discrete = T, option='magma', begin = 0.3, end=0.7, name = "", labels = c("pre-1970", "post-1970")) + theme(legend.position = 'bottom') +
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+  
+plot_grid(s1, s2, align='vh', axis='tblr', labels='auto')
 ```
 
 ### Climate response model:
@@ -663,6 +822,27 @@ ggplot(clim_summ, aes(x=.value, y=interaction(hilo, Region), color=new_pair)) +
   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
   geom_vline(xintercept = 0, linetype="dashed")  +
   xlab("expected correlation")
+```
+
+```{r treeclim_fig}
+
+clim.labs <- c("SPEI", "Mean temperature")
+names(clim.labs) <- c("spei1", "tmean_C")
+
+ggplot(filter(treeclim, model=="correlation"), aes(reorder(month, monthno), coef,  alpha=significant)) +
+  geom_linerange(stat="identity", aes(ymin=0, ymax=coef, color=Species), size=3, position = position_dodge(width=0.5)) +
+  geom_point(data=filter(treeclim, model=="response"),
+             aes(reorder(month, monthno), coef, fill=Species),
+             color="black", shape=21, size=2, position = position_dodge(width=0.5)) +
+  theme_test() +
+  facet_wrap(~varname, ncol = 1, scales='free', labeller=labeller(varname=clim.labs)) +
+  geom_hline(yintercept = 0, size=0.2) +
+  scale_fill_viridis(discrete=T, begin=0.2) +
+  scale_color_viridis(discrete=T, begin=0.2) + ylab("r") + xlab("Month") +
+  guides(alpha = FALSE) +
+  theme(
+   strip.background = element_blank(), strip.text=element_text(hjust=0)
+   )
 ```
 
 
