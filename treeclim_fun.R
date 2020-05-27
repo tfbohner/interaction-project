@@ -17,6 +17,7 @@ climate <- read.csv("Raw Data/monthly_precip_temp_spei.csv") %>%
   as.matrix
 
 
+
 corr <- dcc(chron, climate, selection = -6:9, method = "response",
     dynamic = "static")
 plot(corr)
@@ -56,6 +57,8 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "sl")){
 rownames(allrings) <- allrings$year
 allrings$year <- NA
 
+
+## Species level----
 for(s in list("AC", "PJ", "PL", "PP")) {
   spp <- allrings[,which(str_detect(colnames(allrings), s)==TRUE)]
   chrono <- chron(spp)
@@ -113,13 +116,49 @@ ggplot(filter(all_coefs, model=="correlation"), aes(reorder(month, monthno), coe
 plot(resp$coef$coef, corr$coef$coef)
 abline(0,1)
 
+for(s in list("AC", "PJ", "PL", "PP")) {
+  spp <- allrings[,which(str_detect(colnames(allrings), s)==TRUE)]
+  chrono <- chron(spp)
+  
+  sites <- unique(str_sub(colnames(spp), 1,2))
+  
+  sites <- str_replace(sites, "4.", "4")
+  sites <- str_replace(sites, "8.", "8")
+  
+  climate <- read.csv("Raw Data/monthly_precip_temp_spei.csv") %>% 
+    filter(siteno %in% sites) %>% 
+    mutate(spei1=ifelse(is.infinite(spei1), NA, spei1)) %>% 
+    dplyr::select(c(Year, Month, spei1, tmean_C)) %>% 
+    group_by(Year, Month) %>% 
+    summarize_all(mean, na.rm=T) %>% 
+    as.matrix
+  
+  dc2 <-dcc(chrono = chrono, climate = climate, method="correlation", selection = -10:9, 
+            dynamic="moving")
+  plot(dc2)
+  
+  g_bm <-g_test(dc2,  sb = FALSE)
+  g_bm <- g_bm %>% 
+    filter(p<0.05) %>% 
+    mutate(Species=s)
+  
+  if(s=="AC"){
+    dyn_df <- g_bm
+  }else{
+    dyn_df <- bind_rows(dyn_df, g_bm)
+  }
+  
+}
 
+
+
+## Site level----
 for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "sl")){ 
   
   rings<- read.rwl(paste0("Processed Data/detrended rwl/", i, "_spl_rwl.rwl"))
   
   rings2 <- rings[which(rownames(rings)>1895),]
-  chron <- chron(rings2)
+  chrono <- chron(rings2)
   
   climate <- read.csv("Raw Data/monthly_precip_temp_spei.csv") %>% 
     filter(Site==i) %>% 
@@ -128,7 +167,7 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "sl")){
     summarize_all(mean) %>% 
     as.matrix
   
-  corr <- dcc(chron, climate, selection = -6:9, method = "response",
+  corr <- dcc(chrono, climate, selection = -6:9, method = "response",
               dynamic = "static")
   plot(corr)
   
@@ -151,7 +190,7 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "sl")){
   rings<- read.rwl(paste0("Processed Data/detrended rwl/", i, "_spl_rwl.rwl"))
   
   rings2 <- rings[which(rownames(rings)>1895),]
-  chron <- chron(rings2)
+  chrono <- chron(rings2)
   
   climate <- read.csv("Raw Data/monthly_precip_temp_spei.csv") %>% 
     filter(Site==i) %>% 
@@ -160,7 +199,7 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "sl")){
     summarize_all(mean) %>% 
     as.matrix
   
-  dc2 <-dcc(chrono = chron, climate = climate, method="correlation", selection = -10:9, 
+  dc2 <-dcc(chrono = chrono, climate = climate, method="correlation", selection = -10:9, 
             dynamic="moving", win_offset=5)
   plot(dc2)
   

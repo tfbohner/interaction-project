@@ -31,14 +31,17 @@ precip <- read.csv("Processed Data/precip_temp_spei.csv")
 
 decade <- seq(1910, 2020, by=10)
 
-precip_summary <- expand_grid(precip, decade) %>% 
+precip_summary_raw <- expand_grid(precip, decade) %>% 
   filter(Year-decade>-29, Year<=decade) %>% 
   group_by(Site, siteno, Neighborhood, hilo, decade) %>% 
-  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=function(x) mean(x, na.rm=T), sd=function(x) sd(x, na.rm=T))) %>% 
-  mutate_at(vars(total_ppt_mm_mean, mean_temp_C_mean, spei12_mean, 
-                 total_ppt_mm_sd, mean_temp_C_sd, spei12_sd), .funs = function(x) scale(x, scale = FALSE)) %>% 
+  summarise_at(vars(total_ppt_mm, mean_temp_C, spei12), list(mean=function(x) mean(x, na.rm=T), sd=function(x) sd(x, na.rm=T), cv=function(x) sd(x, na.rm=T)/mean(x, na.rm=T))) %>% 
   left_join(region) %>% 
   ungroup()
+
+precip_summary <- precip_summary_raw %>% 
+  mutate_at(vars(total_ppt_mm_mean, mean_temp_C_mean, spei12_mean, 
+                 total_ppt_mm_sd, mean_temp_C_sd, spei12_sd,
+                 total_ppt_mm_cv, mean_temp_C_cv, spei12_cv), .funs = function(x) scale(x))
 
 spp_pairs <- expand_grid(Species.x=c("ac", "pj", "pl", "pp"), Species.y=c("ac", "pj", "pl", "pp")) %>% 
   mutate(pair_first=str_c(Species.x, Species.y, sep="-"),
@@ -53,8 +56,7 @@ pearson <- read.csv("Processed Data/synchrony_dat.csv") %>%
   left_join(spp_pairs) %>% 
   mutate(spp1=str_sub(pair, 1,2),
          spp2=str_sub(pair, 4,5),
-         comp=ifelse(Species.x==Species.y, "intra", "inter"),
-         z=FisherZ(pearson_r))
+         comp=ifelse(Species.x==Species.y, "intra", "inter"))
 
 
 pearson_t <- read.csv("Processed Data/synchrony_decadal_pearson.csv") %>% 
@@ -66,19 +68,14 @@ pearson_t <- read.csv("Processed Data/synchrony_decadal_pearson.csv") %>%
          spp2=str_sub(pair, 4,5),
          comp=ifelse(Species.x==Species.y, "intra", "inter"),
          pearson_r=round(pearson_r, 4),
-         pearson_r=ifelse(pearson_r>=1, 0.9999, ifelse(pearson_r<=-1,-0.9999, pearson_r)),
-         z=FisherZ(pearson_r))
-
-hist(pearson_t$z)
+         pearson_r=ifelse(pearson_r>=1, 0.9999, ifelse(pearson_r<=-1,-0.9999, pearson_r)))
 
 summary_t <- pearson_t %>% 
-  dplyr::select(c(pearson_r, z, decade, Site.x, Neighborhood.x, pair, comp)) %>% 
+  dplyr::select(c(pearson_r, decade, Site.x, Neighborhood.x, pair, comp)) %>% 
   group_by(Site.x, Neighborhood.x, pair, comp, decade) %>% #
   summarise(samp.depth=length(pearson_r),
             pearson_sd=sd(pearson_r, na.rm=T),
-            pearson_r=mean(pearson_r, na.rm=T),
-            z_sd=sd(z, na.rm=T),
-            z_mean=mean(z, na.rm=T)) %>% 
+            pearson_r=mean(pearson_r, na.rm=T)) %>% 
   left_join(precip_summary, by=c("Site.x"="Site", "Neighborhood.x"="Neighborhood", "decade")) #
 
 ## join all data ----
@@ -126,9 +123,6 @@ mod10<- brm(pearson_r~dist + sizeratio + (1|pair/Region:hilo:Neighborhood.x) + (
 mod11<- brm(pearson_r~dist + sizeratio + (1|pair/Region:hilo) + (dist|Region:hilo) + (1|Region:hilo:Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
 
 mod12<- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~dist + sizeratio + (1|pair/Region:hilo) + (1|Region:hilo/Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
-mod12z<- brm(z~dist + sizeratio + (1|pair/Region:hilo) + (1|Region:hilo/Neighborhood.x), data=alldata, cores=4, control = list(adapt_delta=0.99))
-
-conditional_effects(mod12z)
 
 for(i in 12) {
   mod <- paste0("mod",i)
@@ -140,7 +134,6 @@ loo_model_weights(list(l11, l12))
 
 saveRDS(mod11, "saved models/pearson models/mod11.rds")
 saveRDS(mod12, "saved models/pearson models/mod12.rds")
-saveRDS(mod12z, "saved models/pearson models/mod12z.rds")
 
 
 ### Part 2: through time----
@@ -149,87 +142,46 @@ mod_s_t <- brm(bf(pearson_r ~ s(decade)), data=alldata_t, cores=4, control = lis
 conditional_effects(mod_s_t)
 plot(conditional_effects(mod_s_t), points=TRUE)
 
-mod_s_t2 <- brm(bf(pearson_r ~ s(decade) + (decade|pair)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
-conditional_effects(mod_s_t)
+saveRDS(mod_s_t, "saved models/spline.rds")
+
 
 mod_s_t3 <- brm(bf(pearson_r ~ pair + s(decade, by=pair)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
-mod_s_t4 <- brm(bf(pearson_r ~ pair + s(decade, by=Site.x)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
+mod_s_t4 <- brm(bf(pearson_r ~ Site.x + s(decade, by=Site.x)), data=alldata_t, cores=4, control = list(adapt_delta=0.99))
 conditional_effects(mod_s_t4)
 
-mod11_t<- brm(pearson_r~decade + (decade|pair/Region:hilo), 
-              data=alldata_t, cores=4, control = list(adapt_delta=0.99))
-mod11_t<- brm(pearson_r~dist + sizeratio + decade + (1|pair/Region:hilo) + (dist|Region:hilo) + (1|Region:hilo:Neighborhood.x), 
-              data=alldata_t, cores=4, control = list(adapt_delta=0.99))
-
-saveRDS(mod_s_t3, "saved models/spline.rds")
+saveRDS(mod_s_t3, "saved models/spline_spp.rds")
 saveRDS(mod_s_t4, "saved models/spline_site.rds")
 
 
 ## climate models----
-clim0 <- brm(pearson_r~total_ppt_mm_mean + total_ppt_mm_sd + mean_temp_C_mean + mean_temp_C_sd, data=summary_t, cores=4, control = list(adapt_delta=0.99))
-## high predictor correlations
-vcov(clim0, correlation = T) %>% 
-  round(digits = 3)
+# clim0 <- brm(pearson_r~total_ppt_mm_mean + total_ppt_mm_sd + mean_temp_C_mean + mean_temp_C_sd, data=summary_t, cores=4, control = list(adapt_delta=0.99))
+# ## high predictor correlations
+# vcov(clim0, correlation = T) %>% 
+#   round(digits = 3)
 
-clim1 <- brm(pearson_r~spei12_mean + (1|Site.x + pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim1b <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x + pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim1c <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim1d <- brm(pearson_r~spei12_mean + (spei12_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim1e <- brm(pearson_r|se(pearson_sd, sigma=TRUE)~spei12_mean + (spei12_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1 <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~total_ppt_mm_mean + (total_ppt_mm_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1b <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~total_ppt_mm_mean + (1|Site.x/pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~total_ppt_mm_mean + (1|Site.x + pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1d <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~total_ppt_mm_mean + (total_ppt_mm_mean|Site.x), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim1e <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~total_ppt_mm_mean + (total_ppt_mm_mean|Site.x) + (1|pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
 
-clim2<- update(clim1, formula=~. -spei12_mean +spei12_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim3<- update(clim1, formula=~. -spei12_mean +total_ppt_mm_mean, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim4<- update(clim1, formula=~. -spei12_mean +total_ppt_mm_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim5<- update(clim1, formula=~. -spei12_mean +mean_temp_C_mean, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim6<- update(clim1, formula=~. -spei12_mean +mean_temp_C_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-clim7<- update(clim1, formula=~. +spei12_sd, newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-vcov(clim7, correlation = T) %>% 
-  round(digits = 3)
+loo_model_weights(list(loo(clim1), loo(clim1e)))
 
-for(i in 1:7) {
+clim2 <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~total_ppt_mm_cv + (total_ppt_mm_cv|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim3 <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~mean_temp_C_mean + (mean_temp_C_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim4 <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~mean_temp_C_cv + (mean_temp_C_cv|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim5 <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + (spei12_mean|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+clim6 <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_cv + (spei12_cv|Site.x) + (1|Site.x:pair), data=summary_t, cores=4, control = list(adapt_delta=0.99))
+
+for(i in 1:6) {
   mod <- paste0("clim",i)
   l <- loo(get(mod))
   assign(paste0("l", i), l)
 }
 
-loo_model_weights(list(l1, l2, l7))
+loo_model_weights(list(l1, l2, l3, l4, l5, l6))
 
-conditional_effects(clim7)
+pp_check(clim2)
 
-clim7a<- update(clim1, formula=~. +spei12_sd + (1|Site.x:pair), newdata=summary_t, cores=4, control = list(adapt_delta=0.99))
-l7a <- loo(clim7a)
+saveRDS(clim2, "saved models/pearson models/clim2.rds")
 
-loo_model_weights(list(l7, l7a))
-
-clim7b <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Site.x*pair), 
-              data=summary_t, cores=4, control = list(adapt_delta=0.99))
-l7b <- loo(clim7b)
-
-clim7c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Site.x) + (1|pair/Site.x), 
-              data=summary_t, cores=4, control = list(adapt_delta=0.99))
-
-l7c <- loo(clim7c)
-
-loo_model_weights(list(l7b, l7c), method='pseudobma')
-
-clim7bz <- brm(z_mean~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Site.x*pair), 
-              data=summary_t, cores=4, control = list(adapt_delta=0.99))
-
-pp_check(clim7b)
-
-l7b <- loo(clim7b)
-
-loo_model_weights(list(l7, l7a, l7b))
-
-saveRDS(clim7b, "saved models/pearson models/clim7b.rds")
-saveRDS(clim7c, "saved models/pearson models/clim7c.rds")
-
-clim8c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|Region/hilo) + (1|pair/Region/hilo), 
-              data=summary_t, cores=4, control = list(adapt_delta=0.99))
-
-saveRDS(clim8c, "saved models/pearson models/clim8c.rds")
-
-clim9c <- brm(pearson_r|trunc(lb=-1.001, ub=1.001)~spei12_mean + spei12_sd + (spei12_mean + spei12_sd|comp/Region/hilo), 
-              data=summary_t, cores=4, control = list(adapt_delta=0.99))
-
-saveRDS(clim9c, "saved models/pearson models/clim9c.rds")
