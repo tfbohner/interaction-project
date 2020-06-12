@@ -238,9 +238,6 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   bai$Year <- as.numeric(rownames(bai))
   rwi.stats(bai, prewhiten=T)
   
-  ar <- detrend(rwl = treeave, method="Ar")
-  ar$Year <- as.numeric(rownames(ar))
-  
   nexp <- detrend(rwl = treeave, method="ModNegExp")
   nexp$Year <- as.numeric(rownames(nexp))
   
@@ -248,13 +245,11 @@ for(i in c("sp", "bm", "lc", "pp", "pr", "cm", "ic", "sl")){
   id_df <- get(paste(i,"_id_df_tree", sep=""))
   colnames(spl) <- id_df$label
   write.rwl(spl, paste0("Processed Data/detrended rwl/", i, "_spl_rwl.rwl"))
+  spl <- detrend(rwl = treeave, method="Spline")
   spl$Year <- as.numeric(rownames(spl))
   
   fss <- detrend(rwl = treeave, method="Friedman")
-  fss_ar <- detrend(fss, method="Ar")
   fss$Year <- as.numeric(rownames(fss))
-  
-  rwi.stats(fss, prewhiten=T)
   
   dat<- gather(zero, key="tree", "temp", -Year) %>%
     mutate(zeroRing=ifelse(temp==0, "yes", "no")) %>% 

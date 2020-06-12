@@ -6,7 +6,20 @@ library(treeclim)
 bm<- read.rwl("Processed Data/detrended rwl/bm_spl_rwl.rwl")
 
 bm2 <- bm[which(rownames(bm)>1895),]
-chron <- chron(bm2)
+spp <- bm2[,which(str_detect(colnames(bm2), "PJ")==TRUE)]
+spp2 <- bm2[,which(str_detect(colnames(bm2), "AC")==TRUE)]
+spag.plot(spp)
+chron <- chron(spp2)
+chron1 <- chron(spp)
+
+cor(chron1$xxxstd, chron$xxxstd)
+
+interseries.cor(spp)
+mean(interseries.cor(spp)[,1])
+
+cor(spp, chron$xxxstd, use="pairwise.complete.obs")
+mean(cor(spp, chron$xxxstd, use="pairwise.complete.obs")[,1])
+
 
 
 climate <- read.csv("Raw Data/monthly_precip_temp_spei.csv") %>% 
@@ -61,6 +74,7 @@ allrings$year <- NA
 ## Species level----
 for(s in list("AC", "PJ", "PL", "PP")) {
   spp <- allrings[,which(str_detect(colnames(allrings), s)==TRUE)]
+  print(ncol(spp))
   chrono <- chron(spp)
   
   sites <- unique(str_sub(colnames(spp), 1,2))

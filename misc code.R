@@ -5,6 +5,7 @@ library(Hmisc)
 library(cocor)
 library(ggfortify)
 library(corrr)
+library(codyn)
 
 ## Data ---
 precip <- read.csv("Processed Data/precip_temp_spei.csv")
@@ -17,8 +18,25 @@ rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>%
 
 ## Example neighborhood----
 neigh1 <- rings_field %>% 
-  filter(siteno==11) %>% 
-  filter(Neighborhood==1) 
+  filter(siteno==11) 
+
+grow1 <- neigh1 %>% 
+  group_by(Site, Species, Neighborhood, Year) %>% 
+  summarise(spline_growth=mean(spline_growth))
+
+neigh1_sync <- synchrony(df=grow1,
+                          time.var="Year",
+                          species.var="Species",
+                          abundance.var="spline_growth",
+                          replicate.var = "Neighborhood")
+
+neigh1_variance_ratio <- variance_ratio(df = grow1, 
+                                     species.var = "Species", 
+                                     time.var = "Year",
+                                     abundance.var = "spline_growth", 
+                                     bootnumber = 10, 
+                                     replicate.var = "Neighborhood")
+
 
 count_na <- function(x) sum(is.na(x))
   

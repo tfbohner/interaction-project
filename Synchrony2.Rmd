@@ -37,6 +37,8 @@ library(factoextra)
 library(ggpmisc)
 library(ggrepel)
 library(knitr)
+library(ggmap)
+library(rgdal)
 ```
 
 ## Overview
@@ -59,6 +61,10 @@ rings_field <- read.csv("Processed Data/matched_rings_field.csv")  %>%
   group_by(Site, Neighborhood, Species) %>% 
   mutate(comp_BA=BA_con+BA_het) %>%
   arrange(Site, Neighborhood, Species, ID)
+
+spp_site_core <- rings_field %>% 
+  group_by(Site, Species, Region, hilo) %>% 
+  summarise(n=length(unique(tree.uniqueID)))
   
 region <- rings_field %>% 
   ungroup() %>% 
@@ -182,7 +188,62 @@ alldata_t <- pearson_t %>%
 
   
 ```
+```{r map}
+states <- readOGR("Raw Data/cb_2016_us_state_500k/cb_2016_us_state_500k.shp")
+states1 <-  states[states$NAME=="California",]
+states.f <- fortify(states1, regions="STUSPS")
 
+sites <- read.csv("Raw Data/locations for prism.csv") %>% 
+  mutate(Site=str_sub(Site, 1, 2)) %>% 
+  inner_join(region) %>% 
+  filter(Site!="ic")
+  
+
+raw_clim <- read.csv("Processed Data/precip_temp_spei.csv") %>% 
+  filter(Year>1895, Site!="ic") %>% 
+  mutate(Region=factor(Region, levels=c("Mammoth", "SEKI", "SENF", "San Jac"))) 
+
+reg_clim <- raw_clim %>% 
+  group_by(Region, Year) %>% 
+  summarize(spei12=mean(spei12, na.rm=T),
+            total_ppt_mm=mean(total_ppt_mm),
+            mean_temp_C=mean(mean_temp_C))
+  
+avg_clim <- raw_clim %>% 
+  group_by(Region, hilo) %>% 
+  summarize(Latitude=mean(Latitude),
+            Longitude=mean(Longitude),
+            avg_ppt=mean(total_ppt_mm),
+            avg_temp=mean(mean_temp_C),
+            avg_spei=mean(spei12, na.rm=T))
+
+myLocation <- c(-129, 30, -112, 45)
+
+myLocation <- "Sequoia National Monument"
+
+myMap <- get_map(location=myLocation,
+                 source="google", maptype="satellite", crop=FALSE, zoom=7)
+ggmap(myMap) +
+  # geom_polygon(data=states.f, aes(long,lat, group=group),color="black", fill=NA) +
+  geom_point(data=sites, aes(X, Y, color=Region), size=2) +
+  scale_color_viridis(option='plasma', discrete=T) +
+  labs(x = 'Longitude', y = 'Latitude') +
+  theme_test() +
+  labs(color="") +
+  # theme(legend.position = 'none') +
+  ggtitle("")
+
+ggplot(avg_clim, aes(avg_temp, avg_ppt, color=Region, shape=hilo)) +
+  geom_point(size=3) +
+  scale_color_viridis(option='plasma', discrete=T, direction = -1) +
+  theme_test() +
+  xlab("Mean temperature (C)") +
+  ylab("Mean precipitation (mm)") +
+  # theme(legend.position = 'none') +
+  theme(legend.title = element_blank()) +
+  ggtitle("") +
+  theme(axis.title=element_text(size=14))
+```
 ## Q2 Intra-interspecific competition
 
 ### Pairwise pearson correlation summaires: 
@@ -235,8 +296,8 @@ ggplot(compos, aes(precip_order, fill=Species)) +
   theme_test() +
   ylab("Proportion of samples") +
   xlab("Site (ordered from lowest to highest annual precipitation)") +
-  ggtitle("Species composition") +
-  theme(legend.text=element_text(face="italic"))
+  theme(legend.text=element_text(face="italic")) +
+  theme(axis.title=element_text(size=14))
 
 ## matrix style figure
 # ggplot(alldata, aes(pearson_r, fill=comp)) +
@@ -326,7 +387,8 @@ ggplot() +
   theme_test() +
   xlab("Distance (m)") + ylab("Estimated correlation") +
   ggtitle("") +
-  theme(plot.margin = unit(c(0,0,0,0), "cm"))
+  theme(plot.margin = unit(c(0,0,0,0), "cm")) +
+  theme(axis.title=element_text(size=14))
 
 
 ```
@@ -390,6 +452,9 @@ contrasts <- mod12 %>%
          .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
          .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1))
 
+# test <- group_by(contrasts, pair) %>% 
+#   summarise(post=length(which(r_pair>0))/length(r_pair),
+#             CI=1-2*(1-post))
 
 i1 <- ggplot(data=filter(contrasts, intra_spp=="ac"),
        aes(y = new_pair, x = r_pair, color=comp_spp)) +
@@ -551,7 +616,8 @@ ggplot(data, aes(total_ppt_mm_fn1, mean)) +
   scale_color_viridis(option='plasma', discrete=T) +
   theme_test() + xlab("Mean total annual precipitation (mm)") +
   ylab("Estimated synchrony") +
-  theme(legend.position='none')
+  theme(legend.position='none') +
+  theme(axis.title=element_text(size=14))
 
 newdata <- summary_t %>%
   group_by(Region, hilo, pair) %>%
@@ -566,7 +632,10 @@ site_sp_summ <- expand_grid(newdata,
   mutate(Region=ifelse(Region=="San Jac", "San.Jac", as.character(Region))) %>% 
   left_join(site_clim) 
 
-summary(lm(.value~total_ppt_mm_fn1*pair, data=site_sp_summ))
+intra_sub <- filter(site_sp_summ, pair%in%c("ac-ac", "pj-pj", "pl-pl"))
+
+mod <- lm(.value~pair*total_ppt_mm_fn1, data=site_sp_summ)
+anova(mod)
 
 # site_sp_summ %>%
 #   ggplot(aes(y=pair, x=.value, xmin=.lower, xmax=.upper, color=site)) +
@@ -589,53 +658,97 @@ ggplot(site_sp_summ, aes(total_ppt_mm_fn1, .value, color=pair)) +
   #                 parse = TRUE) +
   scale_color_viridis( discrete=T) +
   theme_test() + xlab("Mean total annual precipitation (mm)") +
-  ylab("Estimated synchrony")
+  ylab("Estimated synchrony") +
+  theme(axis.title=element_text(size=14))
 
 
-# data <- mod12 %>% 
-#   spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[pair_site,], `r_Region:hilo`[site,]) %>% 
-#   mutate(spp_mean=b_Intercept + r_pair + `r_pair:Region:hilo` + `r_Region:hilo`,
-#          valid=str_detect(pair_site, pair)&str_detect(pair_site, site)) %>% 
-#   filter(valid==1) %>% 
-#   median_qi(.width = c(.50, .95)) 
-#   
-# data %>% 
+data <- mod12 %>%
+  spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[pair_site,], `r_Region:hilo`[site,]) %>%
+  mutate(spp_mean=b_Intercept + r_pair + `r_pair:Region:hilo` + `r_Region:hilo`,
+         valid=str_detect(pair_site, pair)&str_detect(pair_site, site)) %>%
+  filter(valid==1) %>%
+  median_qi(.width = c(.50, .95))
+
+# data %>%
 #   ggplot(aes(y=pair, x=spp_mean, xmin=spp_mean.lower, xmax=spp_mean.upper, color=site)) +
 #   geom_pointintervalh(position = position_dodgev(height=0.5)) +
 #   geom_vline(xintercept=0, linetype="dashed") +
 #   theme_test() + ylab("") + xlab("Synchrony effect estimate") +
 #   labs(caption="Fig. Variation in effect of species pairing on synchrony including region and elevation variation") +
 #   theme(plot.caption = element_text(hjust = 0))
+
+data2 <- mod12 %>%
+  spread_draws(b_Intercept,`r_Region:hilo`[site,]) %>%
+  mutate(site_mean=b_Intercept + `r_Region:hilo`) %>% 
+  dplyr::select(site, site_mean) %>%
+  median_qi(.width = c(.50, .95))
+
+
+ggplot(data, aes(y=site, x=spp_mean)) +
+  geom_pointintervalh(aes(xmin=spp_mean.lower, xmax=spp_mean.upper, color=pair), position = position_dodgev(height=0.5)) +
+  scale_color_viridis(discrete=T) +
+  geom_pointintervalh(data=data2, aes(x = site_mean, y=site, xmax=.upper, xmin=.lower), position = position_nudge(y = -0.4), shape=15, size_domain=c(0.5,3.5)) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() + ylab("") + xlab("Synchrony effect estimate") +
+  theme(plot.caption = element_text(hjust = 0)) +
+  theme(legend.title = element_blank()) +
+  theme(axis.title=element_text(size=14))
 # 
 # 
-# mod12 %>% 
-#   spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[pair_site,], `r_Region:hilo`[site,]) %>% 
-#   mutate(spp_mean=b_Intercept + r_pair + `r_pair:Region:hilo` + `r_Region:hilo`,
-#          valid=str_detect(pair_site, pair)&str_detect(pair_site, site)) %>% 
-#   filter(valid==1) %>% 
-#   group_by(site) %>% 
-#   compare_levels(spp_mean, by = pair) %>%
-#   median_qi(.width = c(.50, .95)) %>%  
-#   mutate(pair1=str_sub(pair, 1,5),
-#          pair1_spp1=str_sub(pair, 1,2),
-#          pair1_spp2=str_sub(pair, 4,5),
-#          pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
-#          pair2=str_sub(pair, 9,13),
-#          pair2_spp1=str_sub(pair, 9,10),
-#          pair2_spp2=str_sub(pair, 12,13),
-#          pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
-#          valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>% 
-#   filter(pair1_comp!=pair2_comp, valid==TRUE) %>% 
-#   mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
-#          spp_mean=ifelse(pair1_comp=="intra", spp_mean, spp_mean*-1),
-#          .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
-#          .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1)) %>% 
-#   ggplot(aes(y = new_pair, x = spp_mean, color=site)) +
+data <- mod12 %>%
+  spread_draws(b_Intercept, r_pair[pair,], `r_pair:Region:hilo`[pair_site,], `r_Region:hilo`[site,]) %>%
+  mutate(spp_mean=b_Intercept + r_pair + `r_pair:Region:hilo` + `r_Region:hilo`,
+         valid=str_detect(pair_site, pair)&str_detect(pair_site, site)) %>%
+  filter(valid==1) %>%
+  group_by(site) %>%
+  compare_levels(spp_mean, by = pair) %>%
+  median_qi(.width = c(.50, .95)) %>%
+  mutate(pair1=str_sub(pair, 1,5),
+         pair1_spp1=str_sub(pair, 1,2),
+         pair1_spp2=str_sub(pair, 4,5),
+         pair1_comp=ifelse(pair1_spp1==pair1_spp2, "intra", "inter"),
+         pair2=str_sub(pair, 9,13),
+         pair2_spp1=str_sub(pair, 9,10),
+         pair2_spp2=str_sub(pair, 12,13),
+         pair2_comp=ifelse(pair2_spp1==pair2_spp2, "intra", "inter"),
+         valid=ifelse(pair1_comp=="intra", str_detect(pair2, pair1_spp1), str_detect(pair1, pair2_spp1))) %>%
+  filter(pair1_comp!=pair2_comp, valid==TRUE) %>%
+  mutate(new_pair=ifelse(pair1_comp=="intra", str_c(pair1, pair2, sep=" - "), str_c(pair2, pair1, sep=" - ")),
+         spp_mean=ifelse(pair1_comp=="intra", spp_mean, spp_mean*-1),
+         .upper=ifelse(pair1_comp=="intra", .upper, .upper*-1),
+         .lower=ifelse(pair1_comp=="intra", .lower, .lower*-1))
+  
+data <- data %>% 
+  mutate(col_sp=str_sub(new_pair, 1,2),
+         comp_sp=str_replace_all(new_pair, col_sp, ""),
+         comp_sp=str_squish(str_replace_all(comp_sp, "-", ""))) 
+# 
+# ggplot(data, aes(y = site, x = spp_mean, group=new_pair, color=col_sp)) +
 #   geom_pointintervalh(position = position_dodgev(height=0.5)) +
 #   geom_vline(xintercept=0, linetype="dashed") +
 #   theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate") +
 #   labs(caption="Fig. Contrast in intra versus interspecific synchrony effect including region and elevation variation. Positive \n contrasts indicate thatintraspecific synchrony is greater than interspecific. Species level patterns in differentiation \n predominate although there is noteworthy variation among sites.") +
 #   theme(plot.caption = element_text(hjust = 0))
+
+library(RColorBrewer)
+mypal <- colorRampPalette(brewer.pal(9, "Purples"))
+mypal2 <- colorRampPalette(brewer.pal(7, "YlGn"))
+mypal3 <- colorRampPalette(brewer.pal(5, "OrRd"))
+mypal4 <- colorRampPalette(brewer.pal(6, "GnBu"))
+# show_col(c(mypal(4), mypal2(4), mypal3(4), mypal4(4)))
+
+pal <- c(mypal(4)[2:4],mypal2(4)[2:4],mypal3(4)[2:4],mypal4(4)[2:4])
+# show_col(pal)
+
+
+ggplot(data, aes(y = site, x = spp_mean, group=new_pair, color=interaction(comp_sp, col_sp))) +
+  geom_pointintervalh(position = position_dodgev(height=0.5)) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  theme_test() + ylab("Species pair comparisons") + xlab("Synchrony contrast estimate") +
+  labs(caption="Fig. Contrast in intra versus interspecific synchrony effect including region and elevation variation. Positive \n contrasts indicate thatintraspecific synchrony is greater than interspecific. Species level patterns in differentiation \n predominate although there is noteworthy variation among sites.") +
+  theme(plot.caption = element_text(hjust = 0))+
+  scale_colour_manual(values = pal)
+
 
 ```
 
@@ -661,12 +774,12 @@ ggplot(alldata_t, aes(decade, pearson_r, color=pair)) +
   theme(plot.caption = element_text(hjust = 0))
 
 
-a <- ggplot(precip_summary_raw, aes(decade, spei12_mean, color=Region)) +
+spei_a <- ggplot(precip_summary_raw, aes(decade, spei12_mean, color=Region)) +
   geom_point() +
   stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
   theme_test() + theme(legend.position = 'none')
 
-b <- ggplot(precip_summary_raw, aes(decade, spei12_sd, color=Region)) +
+spei_b <- ggplot(precip_summary_raw, aes(decade, spei12_sd, color=Region)) +
   geom_point()  +
   stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), linetype=hilo), geom="line") +
   theme_test() + theme(legend.position = 'none')
@@ -684,7 +797,7 @@ caption <- ggdraw() +
     plot.margin = margin(0, 0, 0, 7)
   )
 plot_grid(
-  plot_grid(a, b, ncol=2, labels = "auto"), caption, 
+  plot_grid(spei_a, spei_b, ncol=2, labels = "auto"), caption, 
   ncol = 1,
   # rel_heights values control vertical title margins
   rel_heights = c(1, .1)
@@ -760,7 +873,7 @@ me <- marginal_effects(spline_mod)
 
 ggplot(me$decade, aes(decade, estimate__)) +
   geom_ribbon(aes(ymin=lower__, ymax=upper__), alpha=0.3) +
-   geom_line() + theme_test() + ylab("expected correlation") + 
+   geom_line() + theme_test() + ylab("Expected correlation") + 
   labs(caption="Fig. Overall synchrony has increased through time.") +
   theme(plot.caption = element_text(hjust = 0))
 
@@ -772,7 +885,8 @@ s1 <- ggplot(alldata_t, aes(decade, pearson_r)) +
   stat_summary(aes(group=pair, color=pair), geom="pointrange") +
   stat_summary(fun.y=mean, aes(group=pair, color=pair), geom="line") +
   theme_test() +
-  ylab("correlation") +
+  ylab("Correlation") +
+  xlab("Decade") +
   scale_color_viridis(discrete=T, name='') +
   theme(legend.position = 'bottom') +
   ggtitle("") +
@@ -782,7 +896,8 @@ site_time_grow <- ggplot(alldata_t, aes(decade, pearson_r)) +
   stat_summary(aes(group=interaction(Region, hilo), color=Region), geom="pointrange") +
   stat_summary(fun.y=mean, aes(group=interaction(Region, hilo), color=Region, linetype=hilo), geom="line") +
   theme_test() +
-  ylab("correlation") +
+  ylab("Correlation") +
+  xlab("Decade") +
   scale_color_viridis(discrete=T, name='', option='plasma') +
   guides(linetype=guide_legend(title ='', nrow = 2), color=guide_legend( nrow = 2)) +
   theme(legend.position = 'bottom') +
@@ -809,7 +924,7 @@ overall <- data.frame(decade=unique(summary_t$decade)) %>%
 s2 <-ggplot(overall, aes(x=.value, y=pair, color=timechunk)) +
   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
   geom_vline(xintercept = 0, linetype="dashed")  +
-  xlab("expected correlation") + ylab("") + ggtitle("") +
+  xlab("Expected correlation") + ylab("") + ggtitle("") +
   scale_color_viridis(discrete = T, option='magma', begin = 0, end=0.4, name = "", labels = c("pre-1970", "post-1970")) + theme(legend.position = 'none', axis.title.x = element_blank()) +
   theme(plot.margin = unit(c(0,0,0,0), "cm"))
 
@@ -822,7 +937,7 @@ me <- marginal_effects(spline_mod)
 
 ggplot(me$`decade:pair`, aes(decade, estimate__)) +
   geom_ribbon(aes(ymin=lower__, ymax=upper__, fill=pair), alpha=0.3) +
-  geom_line(aes(color=pair)) +  theme_test() + ylab("expected correlation") +
+  geom_line(aes(color=pair)) +  theme_test() + ylab("Expected correlation") +
   labs(caption="Fig. Fluctuations are variable at the species pair level.") +
   theme(plot.caption = element_text(hjust = 0))
 
@@ -843,7 +958,7 @@ time_summ_sp <- time_summ %>%
 s3 <-ggplot(time_summ_sp, aes(x=.value, y=pair, color=timechunk)) +
   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
   geom_vline(xintercept = 0, linetype="dashed")  +
-  xlab("expected correlation") + ylab("") +
+  xlab("Expected correlation") + ylab("") +
   scale_color_viridis(discrete = T, option='magma', begin = 0, end=0.4, name = "", labels = c("pre-1970", "post-1970")) +
   # scale_color_grey(start=0.8, end=0.3) + 
   theme(legend.position = 'bottom') +
@@ -852,7 +967,7 @@ s3 <-ggplot(time_summ_sp, aes(x=.value, y=pair, color=timechunk)) +
 
 
 plot_grid(s1,
-          plot_grid(s2, s3, align='v', axis='lr', rel_heights = c(0.3,1), ncol=1, labels=c('b','c')), labels='a')
+          plot_grid(s2, s3, align='v', axis='lr', rel_heights = c(0.3,1), ncol=1, labels=c('b','c')), labels='a', rel_widths = c(1,0.8))
   
 ```
 
@@ -863,7 +978,7 @@ me <- marginal_effects(spline_mod)
 
 ggplot(me$`decade:Site.x`, aes(decade, estimate__)) +
   geom_ribbon(aes(ymin=lower__, ymax=upper__, fill=Site.x), alpha=0.3) +
-  geom_line(aes(color=Site.x)) +  theme_test() + ylab("expected correlation") +
+  geom_line(aes(color=Site.x)) +  theme_test() + ylab("Expected correlation") +
   labs(caption="Fig. Fluctuations are variable at the site level, there is a particularly steep increase for black mountain (San Jacinto).") +
   theme(plot.caption = element_text(hjust = 0))
 
@@ -882,7 +997,7 @@ time_summ_site <- time_summ %>%
 s3b <-ggplot(time_summ_site, aes(x=.value, y=interaction(hilo, Region), color=timechunk)) +
   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
   geom_vline(xintercept = 0, linetype="dashed")  +
-  xlab("expected correlation") + ylab("") +
+  xlab("Expected correlation") + ylab("") +
   scale_color_viridis(discrete = T, option='magma', begin = 0, end=0.4, name = "", labels = c("pre-1970", "post-1970")) +
   # scale_color_grey(start=0.8, end=0.3) + 
   theme(legend.position = 'bottom') +
@@ -890,7 +1005,7 @@ s3b <-ggplot(time_summ_site, aes(x=.value, y=interaction(hilo, Region), color=ti
   guides(color=guide_legend( nrow = 2)) 
 
 plot_grid(s1b,
-          plot_grid(s2, s3b, align='v', axis='lr', rel_heights = c(0.3,1), ncol=1, labels=c('b','c')), labels='a')
+          plot_grid(s2, s3b, align='v', axis='lr', rel_heights = c(0.3,1), ncol=1, labels=c('b','c')), labels='a', rel_widths = c(1,0.8))
 
 ```
 
@@ -898,12 +1013,19 @@ plot_grid(s1b,
 Model selection supported SPEI as the best predictor for synchrony.  I included both mean and sd in one model although the variables are correlatedd (~.3).  I did not do multiple regression because of multicollinearity. 
 
 ```{r env_model}
-clim_mod <- readRDS("saved models/pearson models/clim2.rds")
+clim_mod <- readRDS("saved models/pearson models/clim6.rds")
 print(clim_mod$formula)
 
+# hypothesis(clim_mod, "spei12_sd=0", scope="coef", group="Site.x")
+
 data <- clim_mod %>% 
-  spread_draws(b_total_ppt_mm_cv, `r_Site.x`[site,]) %>% 
-  mutate(mean=b_total_ppt_mm_cv + `r_Site.x`) %>% 
+  spread_draws(b_spei12_sd, `r_Site.x`[site,]) %>% 
+  mutate(mean=b_spei12_sd + `r_Site.x`)
+
+# test <- group_by(data, site) %>% 
+#   summarise(post=length(which(mean>0))/length(mean))
+
+data <- data %>% 
   median_qi(.width=c(0.5,0.75, 0.95)) %>% 
   left_join(region, by=c("site"="Site"))
 
@@ -912,49 +1034,56 @@ ggplot(data, aes(x=mean, y=interaction(hilo, Region), color=Region)) +
   geom_vline(xintercept = 0, linetype='dashed')+
   theme_test() +
   scale_color_viridis(option='plasma', discrete = T) +
-  ggtitle("Regional response to precipitation variation") +
-  ylab("Site") + xlab("Estimate")
+  ggtitle("Regional response to SPEI variation") +
+  ylab("Site") + xlab("Estimate") +
+  theme(axis.title=element_text(size=14))
 
-scaling <- data.frame(total_ppt_mm_cv=quantile(precip_summary$total_ppt_mm_cv, probs=c(.025, .25, .5, .75, .975)),
-                      ppt_cv_raw=quantile(precip_summary_raw$total_ppt_mm_cv, probs=c(.025, .25, .5, .75, .975)))
+scaling <- data.frame(spei12_sd=quantile(precip_summary$spei12_sd, probs=c(.025, .25, .5, .75, .975)),
+                      spei12_sd_raw=quantile(precip_summary_raw$spei12_sd, probs=c(.025, .25, .5, .75, .975)))
   
 clim_summ <- expand_grid(Site.x=unique(summary_t$Site.x), 
                          scaling) %>% 
-  add_fitted_draws(clim_mod, re_formula = ~(total_ppt_mm_cv | Site.x) ) %>% 
+  add_fitted_draws(clim_mod, re_formula = ~(spei12_sd | Site.x) ) %>% 
   median_qi() %>% 
-  left_join(region, by=c("Site.x"="Site"))
+  left_join(region, by=c("Site.x"="Site")) %>% 
+  mutate(signif=ifelse(Region=="Mammoth", "yes", "no"))
 
-env_res <- ggplot(clim_summ, aes(ppt_cv_raw, .value)) +
+env_res <- ggplot(clim_summ, aes(spei12_sd_raw, .value)) +
   geom_ribbon(aes(ymin=.lower, ymax=.upper, fill=Region, group=interaction(Region, hilo)), alpha=0.2) +
-  geom_line(aes(color=Region , group=interaction(Region, hilo))) + theme_test() +
+  geom_line(aes(color=Region, linetype=signif, group=interaction(Region, hilo))) + theme_test() +
+  scale_linetype_manual(values=c("dashed", "solid")) +
   ylab("Predicted synchrony") + 
-  xlab("CV of precipitation for 30 year intervals") +
+  xlab("SPEI SD for 30 year intervals") +
   # labs(caption="Fig. Regional relationship between precip variability and expected synchrony. In the lowest latitudes synchrony is highest in \n dry periods while in the most mesic site synchrony is higher in the wet periods.") +
   theme(plot.caption = element_text(hjust = 0)) +
   theme_test() +
   scale_color_viridis(option='plasma', discrete = T) +
   scale_fill_viridis(option='plasma', discrete = T) +
+  guides(linetype = FALSE) +
   ggtitle("") +
   labs(fill = "", color="") +
   theme(legend.position = 'bottom') +
   theme(plot.margin = unit(c(0,0.1,0.1,0), "cm"))
 
-env1 <- precip_a +
+env1 <- spei_a +
   scale_color_viridis(option='plasma', discrete = T) +
-  ylab("Mean total annual precipitation (mm)") +
+  scale_linetype_manual(values=c("solid", "solid")) +
+  ylab("Annual SPEI") +
   theme(axis.title.x=element_blank()) +
   ggtitle("") +
   theme(plot.margin = unit(c(0,0.3,0.1,0), "cm"))
 
-env2 <- precip_b +
+env2 <- spei_b +
   scale_color_viridis(option='plasma', discrete = T) +
-  ylab("CV of total annual precipitation") +
+  scale_linetype_manual(values=c("solid", "solid")) +
+  ylab("SPEI SD") +
   theme(axis.title.x=element_blank()) +
   ggtitle("") +
   theme(plot.margin = unit(c(0,0.3,0.1,0), "cm"))
 
 env3 <- site_time_grow +
-  ylab("Growth correlation")  +
+  ylab("Growth correlation") +
+  scale_linetype_manual(values=c("solid", "solid")) +
   theme(axis.title.x=element_blank()) +
   ggtitle("") +
   theme(plot.margin = unit(c(0,0.3,0.1,0), "cm"))+
@@ -965,44 +1094,49 @@ plot_grid(
   env_res, labels=c("", "c"), rel_widths = c(0.8, 1), align='v', axis='tb')
 
 
-# newdata <- summary_t %>% 
-#   group_by(Site.x, pair) %>% 
-#   summarise()
+clim_mod <- readRDS("saved models/pearson models/clim6b.rds")
+newdata <- summary_t %>%
+  group_by(Site.x, pair) %>%
+  summarise() %>% 
+  mutate(site_pair=str_c(Site.x, pair, sep="_"))
 
-# clim_summ <- expand_grid(newdata,
-#                          total_ppt_mm_cv=quantile(summary_t$total_ppt_mm_cv, probs=c(.5))) %>% 
-#   add_fitted_draws(clim_mod, re_formula = ~(1 | Site.x:pair), allow_new_levels=TRUE) %>% 
-#   median_qi(.width=c(0.5,0.75, 0.95)) %>% 
-#   group_by(pair) %>% 
-#   mutate(.value_avg=median(.value),
-#          .lower_avg=median(.lower),
-#          .upper_avg=median(.upper)) %>% 
-#   left_join(region, by=c("Site.x"="Site"))
-# 
-# ggplot(clim_summ, aes(pair, .value)) +
-#   geom_pointinterval(aes(ymin=.lower, ymax=.upper, color=Site.x), position = position_dodge(width=0.5), alpha=0.5) +
-#   # geom_pointinterval(aes(y=.value_avg, ymin=.lower_avg, ymax=.upper_avg)) +
-#   ylab("expected correlation") + 
-#   labs(caption="Fig. There appears to be lwooittle effect of species pair on the relationship between precip variability and synchrony. ") +
-#   theme(plot.caption = element_text(hjust = 0)) +
-#   theme_test() +
-#   scale_color_viridis(option='plasma', discrete = T)
+data <- clim_mod %>% 
+  spread_draws(b_spei12_sd, `r_Site.x:pair`[site_pair,]) %>% 
+  mutate(mean=b_spei12_sd + `r_Site.x:pair`)
 
-# clim_summ <- expand_grid(newdata,
-#                          total_ppt_mm_cv=quantile(summary_t$total_ppt_mm_cv, probs=c(.025, .25, .5, .75, .975))) %>% 
-#   add_fitted_draws(clim_mod, re_formula = NULL, allow_new_levels=TRUE) %>% 
-#   median_qi() %>% 
-#   left_join(region, by=c("Site.x"="Site"))
-# 
-# ggplot(clim_summ, aes(total_ppt_mm_cv, .value)) +
-#   geom_ribbon(aes(ymin=.lower, ymax=.upper, fill=Region, group=interaction(Region, hilo)), alpha=0.2) +
-#   geom_line(aes(color=Region, group=interaction(Region, hilo))) + theme_test() + facet_wrap(~pair)  +
-#   ylab("expected correlation") +
-#   labs(caption="Fig. Specific expected synchrony response to mean precip variability") +
-#   theme(plot.caption = element_text(hjust = 0)) +
-#   theme_test() +
-#   scale_color_viridis(option='plasma', discrete = T) +
-#   scale_fill_viridis(option='plasma', discrete = T)
+# test <- group_by(data, site) %>% 
+#   summarise(post=length(which(mean>0))/length(mean))
+
+data2 <- data %>% 
+  median_qi(.width=c(0.5,0.75, 0.95)) %>% 
+  mutate(Site=str_sub(site_pair, 1,2),
+         pair=str_sub(site_pair, start=4)) %>% 
+  filter(site_pair%in%newdata$site_pair) %>% 
+  left_join(region)
+
+ggplot(data2, aes(x=mean, y=interaction(hilo, Region), color=pair)) +
+  geom_pointintervalh(aes(xmin= mean.lower, xmax=mean.upper), position = position_dodgev(height=0.3)) +
+  geom_vline(xintercept = 0, linetype='dashed')+
+  theme_test() +
+  scale_color_viridis(discrete = T) +
+  ggtitle("Regional response to SPEI variation") +
+  ylab("Site") + xlab("Estimate") +
+  theme(axis.title=element_text(size=14))
+
+clim_summ <- expand_grid(newdata,
+                         spei12_sd=quantile(summary_t$spei12_sd, probs=c(.025, .25, .5, .75, .975))) %>%
+  add_fitted_draws(clim_mod, re_formula = NULL, allow_new_levels=TRUE) %>%
+  median_qi() %>%
+  left_join(region, by=c("Site.x"="Site"))
+
+ggplot(clim_summ, aes(spei12_sd, .value)) +
+  geom_ribbon(aes(ymin=.lower, ymax=.upper, fill=pair), alpha=0.2) +
+  geom_line(aes(color=pair)) + theme_test() + facet_grid(hilo~Region)  +
+  ylab("Expected correlation") +
+  theme(plot.caption = element_text(hjust = 0)) +
+  theme_test() +
+  scale_color_viridis(discrete = T) +
+  scale_fill_viridis(discrete = T)
 
 
 ```
@@ -1045,7 +1179,7 @@ time_summ2 <- time_summ1 %>%
 ggplot(time_summ2, aes(x=.value, y=new_pair, color=timechunk)) +
   geom_pointintervalh(position = position_dodgev(height=0.5)) + theme_test() +
   geom_vline(xintercept = 0, linetype="dashed")  +
-  xlab("expected correlation")+ ylab("Species contrast") + 
+  xlab("Expected correlation")+ ylab("Species contrast") + 
   labs(caption="Fig. Changes in synchrony differences between intra and interspecific pairing. Post 1970 \n white fir intraspecific synchrony has become stronger than interspecific synchrony.") +
   theme(plot.caption = element_text(hjust = 0))
 
